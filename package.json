@@ -1,0 +1,33 @@
+{
+  "name": "hookshot",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Declarative Claude Code hooks",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "bench": "node bench/parse.bench.ts"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.21.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.21.0",
+  "devDependencies": {
+    "@fast-check/vitest": "^0.5.0",
+    "@questi0nm4rk/shell-ast": "^0.8.0",
+    "@types/bun": "^1.4.4",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.1.0",
+    "fast-check": "^4.10.2",
+    "mitata": "^1.0.34",
+    "sh-syntax": "0.8.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
