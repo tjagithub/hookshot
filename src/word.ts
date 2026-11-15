@@ -1,4 +1,5 @@
-import type { DblQuoted, Lit, ParamExp, SglQuoted, Word, WordPart } from './ast.ts'
+import type { DblQuoted, Lit, Word, WordPart } from './ast.ts'
+import { unhandled } from './ast.ts'
 
 export type Quoting = 'none' | 'single' | 'double' | 'mixed'
 
@@ -33,20 +34,31 @@ const unescapeBare = (s: string) => s.replace(/\\(\n|.)/gs, (_, c: string) => (c
 // In double quotes only $ ` " \ and newline are special after a backslash.
 const unescapeDouble = (s: string) => s.replace(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c))
 
-function holeOf(p: WordPart): Hole {
-  if (p.Type === 'ParamExp') return { dynamic: `$${(p as ParamExp).Param?.Value ?? ''}` }
-  if (p.Type === 'CmdSubst' || p.Type === 'ProcSubst') return { dynamic: '$(…)' }
-  if (p.Type === 'ArithmExp') return { dynamic: '$((…))' }
-  if (p.Type === 'SglQuoted') return { dynamic: "$'…'" }
-  return { dynamic: `<${p.Type ?? 'unknown'}>` }
+function holeOf(p: Exclude<WordPart, Lit | DblQuoted>): Hole {
+  switch (p.Type) {
+    case 'ParamExp':
+      return { dynamic: `$${p.Param?.Value ?? ''}` }
+    case 'CmdSubst':
+    case 'ProcSubst':
+      return { dynamic: '$(…)' }
+    case 'ArithmExp':
+      return { dynamic: '$((…))' }
+    case 'SglQuoted':
+      return { dynamic: "$'…'" }
+    case 'ExtGlob':
+    case 'BraceExp':
+      return { dynamic: `<${p.Type}>` }
+    default:
+      return { dynamic: `<${unhandled(p)}>` }
+  }
 }
 
 function segmentsOf(parts: WordPart[], inDouble: boolean): Segment[] {
   const out: Segment[] = []
   for (const p of parts) {
-    if (p.Type === 'Lit') out.push((inDouble ? unescapeDouble : unescapeBare)((p as Lit).Value ?? ''))
-    else if (p.Type === 'SglQuoted' && !(p as SglQuoted).Dollar) out.push((p as SglQuoted).Value ?? '')
-    else if (p.Type === 'DblQuoted') out.push(...segmentsOf((p as DblQuoted).Parts ?? [], true))
+    if (p.Type === 'Lit') out.push((inDouble ? unescapeDouble : unescapeBare)(p.Value ?? ''))
+    else if (p.Type === 'SglQuoted' && !p.Dollar) out.push(p.Value ?? '')
+    else if (p.Type === 'DblQuoted') out.push(...segmentsOf(p.Parts ?? [], true))
     else out.push(holeOf(p))
   }
   return out

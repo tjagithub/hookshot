@@ -37,6 +37,12 @@ describe('wordValue', () => {
     expect(w).toMatchObject({ kind: 'dynamic', hint })
   })
 
+  test.each(['ExtGlob', 'NewPart'])('a %s part (scanned only, or unknown to hookshot) is a named hole', (Type) => {
+    const at = { Offset: 0, Line: 1, Col: 1 }
+    const w = wordValue({ Pos: at, End: at, Parts: [{ Type, Pos: at, End: at } as never] })
+    expect(w).toMatchObject({ kind: 'dynamic', hint: `<${Type}>` })
+  })
+
   test('couldEqual treats holes as any text', async () => {
     const [, a, b, c] = await words('x "$X" "$X/*" "$tmp/build"')
     expect(couldEqual(a!, ['/'])).toBe(true)

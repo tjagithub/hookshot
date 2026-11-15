@@ -51,66 +51,107 @@ export interface Word extends Spanned {
   Parts: WordPart[]
 }
 
-export interface Lit extends Node {
+// The unions below are closed: a switch on Type narrows without casts, and `unhandled` in its default
+// makes a missing case a compile error. mvdan may still send a Type not listed; `unhandled` names it.
+
+export interface Lit extends Spanned {
   Type: 'Lit'
   /** Omitted when empty, like every typedjson field. */
   Value?: string
 }
-export interface SglQuoted extends Node {
+export interface SglQuoted extends Spanned {
   Type: 'SglQuoted'
   Value?: string
   Dollar?: boolean
 }
-export interface DblQuoted extends Node {
+export interface DblQuoted extends Spanned {
   Type: 'DblQuoted'
   Parts?: WordPart[]
   Dollar?: boolean
 }
-export interface ParamExp extends Node {
+export interface ParamExp extends Spanned {
   Type: 'ParamExp'
   Param?: Lit | null
   Short?: boolean
 }
-export interface CmdSubst extends Node {
+export interface CmdSubst extends Spanned {
   Type: 'CmdSubst'
   Stmts?: Stmt[]
 }
-export interface ProcSubst extends Node {
+export interface ProcSubst extends Spanned {
   Type: 'ProcSubst'
   Op: string
   Stmts?: Stmt[]
 }
-export type WordPart = Lit | SglQuoted | DblQuoted | ParamExp | CmdSubst | ProcSubst | Node
+/** Parts hookshot only scans into: their fields stay untyped. */
+export interface OpaquePart extends Spanned {
+  Type: 'ArithmExp' | 'ExtGlob' | 'BraceExp'
+}
+export type WordPart = Lit | SglQuoted | DblQuoted | ParamExp | CmdSubst | ProcSubst | OpaquePart
 
-export interface CallExpr extends Node {
+export interface CallExpr extends Spanned {
   Type: 'CallExpr'
   Assigns?: Assign[]
   Args?: Word[]
 }
-export interface BinaryCmd extends Node {
+export interface BinaryCmd extends Spanned {
   Type: 'BinaryCmd'
   Op: string
   X: Stmt
   Y: Stmt
 }
 export interface IfClause extends Spanned {
+  /** Absent on an else branch without its own condition. */
   Type?: 'IfClause'
   Cond?: Stmt[]
   Then?: Stmt[]
   Else?: IfClause | null
+}
+export interface Block extends Spanned {
+  Type: 'Subshell' | 'Block'
+  Stmts?: Stmt[]
+}
+export interface WhileClause extends Spanned {
+  Type: 'WhileClause'
+  Cond?: Stmt[]
+  Do?: Stmt[]
+}
+export interface ForClause extends Spanned {
+  Type: 'ForClause'
+  Loop?: unknown
+  Do?: Stmt[]
+}
+export interface CaseClause extends Spanned {
+  Type: 'CaseClause'
+  Word?: Word
+  Items?: Array<{ Patterns?: Word[]; Stmts?: Stmt[] }>
+}
+export interface FuncDecl extends Spanned {
+  Type: 'FuncDecl'
+  Body?: Stmt
+}
+export interface Wrapped extends Spanned {
+  Type: 'TimeClause' | 'CoprocClause'
+  Stmt?: Stmt | null
+}
+/** Commands hookshot only scans for $(...) inside. */
+export interface ScannedCmd extends Spanned {
+  Type: 'DeclClause' | 'ArithmCmd' | 'LetClause' | 'TestClause'
 }
 
 export type Command =
   | CallExpr
   | BinaryCmd
   | (IfClause & { Type: 'IfClause' })
-  | (Node & { Type: 'Subshell' | 'Block'; Stmts?: Stmt[] })
-  | (Node & { Type: 'WhileClause'; Cond?: Stmt[]; Do?: Stmt[] })
-  | (Node & { Type: 'ForClause'; Loop?: Node; Do?: Stmt[] })
-  | (Node & { Type: 'CaseClause'; Word?: Word; Items?: Array<{ Patterns?: Word[]; Stmts?: Stmt[] }> })
-  | (Node & { Type: 'FuncDecl'; Body?: Stmt })
-  | (Node & { Type: 'TimeClause' | 'CoprocClause'; Stmt?: Stmt | null })
-  | (Node & { Type: 'DeclClause'; Args?: Assign[] })
-  | (Node & { Type: 'ArithmCmd' | 'LetClause' | 'TestClause' })
+  | Block
+  | WhileClause
+  | ForClause
+  | CaseClause
+  | FuncDecl
+  | Wrapped
+  | ScannedCmd
+
+/** For a switch default: never at compile time; at run time, the Type mvdan sent that no case covers. */
+export const unhandled = (x: never): string => String((x as { Type?: unknown } | null)?.Type ?? 'unknown')
 
 export const isNode = (v: unknown): v is Node => typeof v === 'object' && v !== null && !Array.isArray(v)

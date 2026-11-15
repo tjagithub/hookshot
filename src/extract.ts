@@ -1,5 +1,5 @@
-import type { CallExpr, Command, IfClause, Node, Redirect, Stmt } from './ast.ts'
-import { isNode } from './ast.ts'
+import type { BinaryCmd, CallExpr, Command, IfClause, Redirect, Stmt } from './ast.ts'
+import { isNode, unhandled } from './ast.ts'
 import { type Parsed, parse as defaultParse } from './parse.ts'
 import { type WordValue, wordValue } from './word.ts'
 import { commandName, findExecs, opaqueShells, parsedShells, shellScriptWord, unwrap } from './wrappers.ts'
@@ -123,7 +123,7 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
       for (const x of v) await scan(x, ctx)
     } else if (isNode(v)) {
       if (v.Type === 'CmdSubst' || v.Type === 'ProcSubst') {
-        await walkStmts((v.Stmts as Stmt[] | undefined) ?? [], { ...ctx, inSubst: true }, false)
+        await walkStmts((v as { Stmts?: Stmt[] }).Stmts ?? [], { ...ctx, inSubst: true }, false)
         return
       }
       for (const [k, x] of Object.entries(v)) if (k !== 'Pos' && k !== 'End') await scan(x, ctx)
@@ -201,71 +201,63 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     out.redirects.push(...redirects)
     await scan(s.Redirs, ctx)
     const alone = standalone && !background && !negated && !redirects.length && !ctx.inSubst && ctx.origin.kind === 'top'
-    const cmd = s.Cmd as Command | null | undefined
+    const cmd = s.Cmd
     if (!cmd) return
     const stmt = { script: ctx.script, origin: ctx.origin, base: ctx.base, background, negated, redirects, inSubstitution: ctx.inSubst }
     const withPipe = ctx.pipeline ? { ...stmt, pipeline: ctx.pipeline } : stmt
 
     switch (cmd.Type) {
       case 'CallExpr':
-        return walkCall(cmd as CallExpr, withPipe, alone, ctx)
-      case 'BinaryCmd': {
-        const b = cmd as Extract<Command, { Type: 'BinaryCmd' }>
-        if (b.Op === '&&' || b.Op === '||') {
-          await walkStmt(b.X, ctx, alone)
-          return walkStmt(b.Y, ctx, alone)
-        }
-        if (b.Op !== '|' && b.Op !== '|&') return void unknown('unsupported-syntax', `operator ${b.Op}`)
-        const flat = (x: Stmt): Stmt[] => {
-          const c = x.Cmd as Command | undefined
-          const op = c?.Type === 'BinaryCmd' ? (c as typeof b).Op : undefined
-          return !x.Redirs?.length && (op === '|' || op === '|&') ? [...flat((c as typeof b).X), ...flat((c as typeof b).Y)] : [x]
-        }
-        const pipeline: Pipeline = { id: pipelineIds++, stages: [] }
-        out.pipelines.push(pipeline)
-        for (const [i, stage] of flat(s).entries()) {
-          const collected: Invocation[] = []
-          pipeline.stages.push(collected)
-          await walkStmt(stage, { ...ctx, stages: [...ctx.stages, collected], pipeline: { id: pipeline.id, stage: i } }, false)
-        }
-        return
-      }
+        return walkCall(cmd, withPipe, alone, ctx)
+      case 'BinaryCmd':
+        return walkBinary(s, cmd, alone, ctx)
       case 'Subshell':
       case 'Block':
+        return walkStmts(cmd.Stmts ?? [], ctx, false)
       case 'WhileClause':
-        return walkStmts([...((cmd as Node).Cond as Stmt[] ?? []), ...((cmd as Node).Do as Stmt[] ?? []), ...((cmd as Node).Stmts as Stmt[] ?? [])], ctx, false)
+        return walkStmts([...(cmd.Cond ?? []), ...(cmd.Do ?? [])], ctx, false)
       case 'IfClause':
-        return walkIf(cmd as IfClause, ctx)
-      case 'ForClause': {
-        const f = cmd as Extract<Command, { Type: 'ForClause' }>
-        await scan(f.Loop, ctx)
-        return walkStmts(f.Do ?? [], ctx, false)
-      }
-      case 'CaseClause': {
-        const c = cmd as Extract<Command, { Type: 'CaseClause' }>
-        await scan(c.Word, ctx)
-        for (const item of c.Items ?? []) {
+        return walkIf(cmd, ctx)
+      case 'ForClause':
+        await scan(cmd.Loop, ctx)
+        return walkStmts(cmd.Do ?? [], ctx, false)
+      case 'CaseClause':
+        await scan(cmd.Word, ctx)
+        for (const item of cmd.Items ?? []) {
           await scan(item.Patterns, ctx)
           await walkStmts(item.Stmts ?? [], ctx, false)
         }
         return
-      }
-      case 'FuncDecl': {
-        const body = (cmd as Extract<Command, { Type: 'FuncDecl' }>).Body
-        return body ? walkStmt(body, ctx, false) : undefined
-      }
+      case 'FuncDecl':
+        return cmd.Body ? walkStmt(cmd.Body, ctx, false) : undefined
       case 'TimeClause':
-      case 'CoprocClause': {
-        const inner = (cmd as { Stmt?: Stmt | null }).Stmt
-        return inner ? walkStmt(inner, ctx, false) : undefined
-      }
+      case 'CoprocClause':
+        return cmd.Stmt ? walkStmt(cmd.Stmt, ctx, false) : undefined
       case 'DeclClause':
       case 'ArithmCmd':
       case 'LetClause':
       case 'TestClause':
         return scan(cmd, ctx)
       default:
-        unknown('unsupported-syntax', `command type ${String((cmd as Node).Type)}`)
+        unknown('unsupported-syntax', `command type ${unhandled(cmd)}`)
+    }
+  }
+
+  // && and || walk both sides; a pipe (| or |&) flattens into one pipeline of ordered stages.
+  async function walkBinary(s: Stmt, b: BinaryCmd, alone: boolean, ctx: Ctx) {
+    if (b.Op === '&&' || b.Op === '||') {
+      await walkStmt(b.X, ctx, alone)
+      return walkStmt(b.Y, ctx, alone)
+    }
+    if (b.Op !== '|' && b.Op !== '|&') return void unknown('unsupported-syntax', `operator ${b.Op}`)
+    const isPipe = (c: Command | null | undefined): c is BinaryCmd => c?.Type === 'BinaryCmd' && (c.Op === '|' || c.Op === '|&')
+    const flat = (x: Stmt): Stmt[] => (!x.Redirs?.length && isPipe(x.Cmd) ? [...flat(x.Cmd.X), ...flat(x.Cmd.Y)] : [x])
+    const pipeline: Pipeline = { id: pipelineIds++, stages: [] }
+    out.pipelines.push(pipeline)
+    for (const [i, stage] of flat(s).entries()) {
+      const collected: Invocation[] = []
+      pipeline.stages.push(collected)
+      await walkStmt(stage, { ...ctx, stages: [...ctx.stages, collected], pipeline: { id: pipeline.id, stage: i } }, false)
     }
   }
 

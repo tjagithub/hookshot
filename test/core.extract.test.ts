@@ -84,6 +84,14 @@ describe('extract: what it cannot decide', () => {
     const x = await extract('ls', { parse: () => Promise.reject(new Error('gone')) })
     expect(x.unknowns).toEqual([{ why: 'parser-unavailable', detail: 'gone' }])
   })
+
+  test('a command type mvdan sends that hookshot does not know is unsupported syntax, by name', async () => {
+    const real = (await parse('ls'))!
+    const cmd = real.file.Stmts![0]!.Cmd as unknown as { Type: string }
+    cmd.Type = 'TestDecl'
+    const x = await extract('ls', { parse: async () => real })
+    expect(x.unknowns).toEqual([{ why: 'unsupported-syntax', detail: 'command type TestDecl' }])
+  })
 })
 
 describe('redirects', () => {
