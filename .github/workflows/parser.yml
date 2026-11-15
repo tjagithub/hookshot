@@ -1,0 +1,89 @@
+name: parser
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: parser-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: darwin-arm64 }
+          - { os: macos-15-intel, target: darwin-x64 }
+          # 22.04: glibc 2.35, so the addon also loads on older distributions.
+          - { os: ubuntu-22.04, target: linux-x64 }
+          - { os: ubuntu-22.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: native/go.mod
+          # No caches anywhere: this job builds the release binaries.
+          cache: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+      - run: pnpm install --frozen-lockfile
+      # The backend tests compare every tree with shfmt from the same mvdan/sh version.
+      - run: go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1 && echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - run: native/build.sh
+      - name: wasm in git matches this build
+        run: git diff --exit-code --stat -- native/build/hsparse.wasm native/build/wasm_exec.js || echo "::warning::native/build/hsparse.wasm differs from a fresh build; rebuild and commit it"
+      - run: pnpm typecheck
+      - run: pnpm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hsparse-${{ matrix.target }}
+          path: native/build/hsparse-${{ matrix.target }}.node
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: hsparse-*
+          merge-multiple: true
+          path: dist
+      - name: checksums
+        working-directory: dist
+        run: sha256sum hsparse-*.node > SHA256SUMS && cat SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+          else
+            gh release create "$TAG" dist/* --repo "$REPO" --verify-tag --generate-notes
+          fi
