@@ -174,6 +174,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      smol-toml:
+        specifier: ^1.9.1
+        version: 1.9.1
     devDependencies:
       '@fast-check/vitest':
         specifier: ^0.5.0
@@ -710,6 +714,10 @@ packages:
     resolution: {integrity: sha512-BI2cAN1oIyfxMw/W10wFx4QfvOG5GGFZfgPO7KSomspXxM2IOL/S9QLE6yDG7mTo2LHyndOC53epFD0uv3nSFw==}
     engines: {node: '>=18.0.0'}
 
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
+
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -1196,6 +1204,8 @@ snapshots:
       '@rolldown/binding-win32-x64-msvc': 1.2.19
 
   sh-syntax@0.8.4: {}
+
+  smol-toml@1.9.1: {}
 
   source-map-js@1.2.2: {}
 

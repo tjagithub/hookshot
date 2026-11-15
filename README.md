@@ -138,18 +138,64 @@ This rule asks the first 3 times it fires in a session, then denies. A hook cann
 
 State is one append-only JSONL file per session, in `$CLAUDE_PLUGIN_DATA/hookshot/` or `~/.local/state/hookshot/`. Files older than 7 days are pruned. History loads only when a rule uses `escalate`. If there is no session id, or the store can't be read or written, the result is a `state-unavailable` Unknown. Pass `hooks(rules, { store })` to use another store. With `store: null`, escalating rules give that Unknown.
 
+## Config files
+
+Rules can also live in a `hookshot.toml`, with no TypeScript. `hookshot init` writes a starter file:
+
+```toml
+#:schema https://unpkg.com/@tjakit/hookshot/schema/hookshot.schema.json
+version = 1
+on_unknown = "ask"   # ask, deny or allow
+
+[[rewrite]]                      # grep -> rg by a flag table; a flag it cannot map is refused
+command = ["grep", "egrep"]
+to = "rg"
+message = "use rg (e.g. rg PATTERN [path])"
+[rewrite.flags]
+"-r" = ""                        # drop
+"--ignore-case" = "-i"           # rename
+"-e" = false                     # no equivalent: refuse
+"-A" = { to = "-A", value = "number", form = "attached" }
+"--exclude" = { to = "-g", value = "any", quote = "always", prefix = "!" }
+
+[[deny]]
+command = "rm"
+aliases = { "-r" = "--recursive", "-R" = "--recursive" }
+flags = ["--recursive"]
+args = ["/", "~", "$HOME"]
+message = "refusing recursive rm on '{arg}'"
+
+[[ask]]
+pipe = { from = ["curl", "wget"], to = ["sh", "bash"] }
+message = "this pipes a download into a shell"
+
+[[deny]]
+path = "/**/.env{,.*}"
+except = ["/**/*.example"]
+message = "refusing to write {path}"
+```
+
+- `deny`, `ask` and `note` each take a `message` and exactly one matcher: `command` (with `subcommand`, `flags`, `without_flags`, `aliases`, `value_flags`, `args`, `via`, `standalone`), `pipe`, `path` (with `op`, `except`, `on_dynamic`) or `word` (`prefix`, `unquoted`). `name` and `escalate` work as in TypeScript.
+- A `rewrite` maps the leading flags of a command by its table: `""` drops a flag, a string renames it, `false` has no equivalent, and a table maps a flag with a value. `unlisted` and `after_args` choose refuse (default) or keep. A refusal denies (or asks, with `refuse = "ask"`) with the message and the reason. `like = "<name>"` starts from the table of an earlier rewrite.
+- The `#:schema` line gives completion, hovers and errors in editors that use [Taplo](https://taplo.tamasfe.dev) (Even Better TOML) or [Tombi](https://tombi-toml.github.io/tombi/).
+- `run`, `test` and `install` take a `.toml` in place of a rules file. `hookshot check hookshot.toml` validates it and lists its rules. A config that fails to parse or validate is an error naming the key path (`deny[2].flags[0]: expected string`), and `run` turns that into an ask.
+- What TOML cannot say, such as a rewrite that moves arguments, stays in TypeScript. Mix the two with `hooks([...configRules('./hookshot.toml'), myRule])`. [examples/guardrails-toml](examples/guardrails-toml) is the guardrails example written this way.
+
 ## CLI
 
 ```text
-hookshot run <rules.ts>                  read a PreToolUse event on stdin, print the decision
-hookshot test <rules.ts> [command...]    check commands (or stdin lines) against the rules
+hookshot run <rules>                     read a PreToolUse event on stdin, print the decision
+hookshot test <rules> [command...]       check commands (or stdin lines) against the rules
     --tool Write --path p                check a file tool instead (--path repeats)
     --cwd dir   --json   --expect allow|ask|deny   (exit 1 on a mismatch, for CI)
-hookshot install <rules.ts> [--scope user|project|local] [--runtime bun|node] [--dry-run]
-hookshot uninstall <rules.ts> [--scope ...] [--dry-run]
+hookshot check <hookshot.toml>           validate a config and list its rules (exit 1 on errors)
+hookshot init [hookshot.toml]            write a starter config (never overwrites)
+hookshot install <rules> [--scope user|project|local] [--runtime bun|node] [--dry-run]
+hookshot uninstall <rules> [--scope ...] [--dry-run]
 hookshot fetch-parser [--tag vX.Y.Z]     download the native parser for this platform
 ```
 
+- `<rules>` is a `.ts`/`.js` file that `export default`s `hooks([...])`, or a `hookshot.toml`.
 - `run` always exits 0. Claude Code lets a tool call through when a hook exits with any code other than 0 or 2. So when the rules file fails to load, or anything throws, `run` prints an ask.
 - `install` merges one `PreToolUse` entry (matcher `Bash|Write|Edit|MultiEdit|NotebookEdit|Read`) into the settings file for the scope, in exec form, with `"onFailure": "block"`, so a hook that cannot start blocks the call. It is idempotent, writes a `.bak` first, and refuses a settings file that is not valid JSON.
 

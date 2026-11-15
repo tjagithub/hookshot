@@ -23,4 +23,9 @@ export {
   orderEdits, pass, resolve, rewrite, unknown,
 } from './verdict.ts'
 export { type Dynamic, type Literal, type Quoting, type Segment, type WordValue, couldEqual, display, wordValue } from './word.ts'
+export { type GrepTranslation, grepToRg, shQuote } from './translate/grep-rg.ts'
 export { type Unwrapped, type WrapperSpec, commandName, unwrap, wrappers } from './wrappers.ts'
+export { type Config, ConfigInvalid, compileConfig, configRules, loadConfig, parseConfig } from './config/load.ts'
+export { schema, schemaUrl } from './config/schema.ts'
+export { type ConfigError, validate } from './config/validate.ts'
+export { type FlagEntry, type FlagMapping, type FlagTable, type ValueFlag, mapFlags } from './translate/flag-map.ts'

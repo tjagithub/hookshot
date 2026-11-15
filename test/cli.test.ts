@@ -100,6 +100,55 @@ describe('hookshot run', () => {
   })
 })
 
+describe('hookshot.toml configs', () => {
+  const toml = join(repo, 'examples/guardrails-toml/hookshot.toml')
+  test('test and run take a .toml', async () => {
+    const t = io()
+    expect(await main(['test', toml, 'grep -rn foo src', '--expect', 'allow'], t.io)).toBe(0)
+    expect(t.out()).toContain('-> rg -n foo src')
+    const r = io({}, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'zgrep x f.gz' } }))
+    expect(await main(['run', toml], r.io)).toBe(0)
+    expect(JSON.parse(r.out())).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+  })
+  test('run with a broken config asks and exits 0', async () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'bad.toml'), 'version = 1\n[[deny]]\nmessage = "m"\n')
+    const t = io({ cwd: dir }, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }))
+    expect(await main(['run', 'bad.toml'], t.io)).toBe(0)
+    const out = JSON.parse(t.out()) as { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } }
+    expect(out.hookSpecificOutput.permissionDecision).toBe('ask')
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain('deny[0]: needs exactly one of')
+  })
+  test('check lists the rules, or prints the errors and exits 1', async () => {
+    const ok = io()
+    expect(await main(['check', toml], ok.io)).toBe(0)
+    expect(ok.out()).toMatch(/^rewrite grep -> rg\n/)
+    expect(ok.out()).toMatch(/ask     guardrails\n/)
+    const dir = tmp()
+    writeFileSync(join(dir, 'bad.toml'), 'version = 2\nfoo = 1\n')
+    const bad = io({ cwd: dir })
+    expect(await main(['check', 'bad.toml'], bad.io)).toBe(1)
+    expect(bad.err()).toBe('bad.toml: version: must be 1\nbad.toml: foo: unknown key "foo"\n')
+    expect(await main(['check'], io().io)).toBe(2)
+  })
+  test('init writes a valid template and never overwrites', async () => {
+    const cwd = tmp()
+    expect(await main(['init'], io({ cwd }).io)).toBe(0)
+    expect(readFileSync(join(cwd, 'hookshot.toml'), 'utf8')).toMatch(/^#:schema https:/)
+    expect(await main(['check', 'hookshot.toml'], io({ cwd }).io)).toBe(0)
+    const again = io({ cwd })
+    expect(await main(['init', 'hookshot.toml'], again.io)).toBe(1)
+    expect(again.err()).toContain('not overwriting')
+    expect(await main(['init', 'a.toml', 'b.toml'], io({ cwd }).io)).toBe(2)
+  })
+  test.skipIf(spawnSync('deno', ['--version']).status !== 0)('a .toml runs in deno (smol-toml loads there)', () => {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'zgrep x f.gz' }, cwd: repo })
+    const r = spawnSync('deno', ['run', '--allow-read', '--allow-env', join(repo, 'bin/hookshot.ts'), 'run', toml], { input, encoding: 'utf8' })
+    expect(r.stderr).toBe('')
+    expect(JSON.parse(r.stdout)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+  })
+})
+
 describe('hookshot install / uninstall', () => {
   const project = () => {
     const dir = tmp()

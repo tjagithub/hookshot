@@ -21,7 +21,8 @@
     "dist",
     "native/build/hsparse-*.node",
     "native/build/hsparse.wasm",
-    "native/build/wasm_exec.js"
+    "native/build/wasm_exec.js",
+    "schema"
   ],
   "engines": {
     "node": ">=22.18"
@@ -37,7 +38,8 @@
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "release": "scripts/release.sh",
-    "bench": "node bench/parse.bench.ts"
+    "bench": "node bench/parse.bench.ts",
+    "schema": "node scripts/schema.ts"
   },
   "packageManager": "pnpm@12.21.0",
   "devDependencies": {
@@ -52,5 +54,8 @@
     "sh-syntax": "0.8.4",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "smol-toml": "^1.9.1"
   }
 }

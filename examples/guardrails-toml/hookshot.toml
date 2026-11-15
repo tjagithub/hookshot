@@ -1,0 +1,105 @@
+#:schema ../../schema/hookshot.schema.json
+# bash-guard as a config: examples/guardrails/hooks.ts in TOML, minus sed -n -> jouet read (see hooks.ts here).
+version = 1
+
+[[rewrite]]
+name = "grep -> rg"
+command = ["grep", "egrep"]
+to = "rg"
+message = "grep is not allowed here; use rg (e.g. rg PATTERN [path], rg --files -g '<glob>')."
+note = "rg skips .gitignored and hidden files; add -uu for grep -r behaviour"
+# In rg, -r is --replace, -h is --help and -L follows links, so those map elsewhere or drop.
+[rewrite.flags]
+"-n" = "-n"
+"-i" = "-i"
+"-l" = "-l"
+"-c" = "-c"
+"-v" = "-v"
+"-w" = "-w"
+"-o" = "-o"
+"-F" = "-F"
+"-H" = "-H"
+"-q" = "-q"
+"-x" = "-x"
+"-P" = "-P"
+"-a" = "-a"
+"-b" = "-b"
+"-r" = ""
+"-R" = ""
+"-E" = ""
+"-s" = "--no-messages"
+"-h" = "-I"
+"-L" = "--files-without-match"
+"-A" = { to = "-A", value = "number", form = "attached" }
+"-B" = { to = "-B", value = "number", form = "attached" }
+"-C" = { to = "-C", value = "number", form = "attached" }
+"-m" = { to = "-m", value = "number", form = "attached" }
+"--recursive" = ""
+"--extended-regexp" = ""
+"--ignore-case" = "-i"
+"--line-number" = "-n"
+"--count" = "-c"
+"--files-with-matches" = "-l"
+"--files-without-match" = "--files-without-match"
+"--invert-match" = "-v"
+"--word-regexp" = "-w"
+"--only-matching" = "-o"
+"--fixed-strings" = "-F"
+"--perl-regexp" = "-P"
+"--quiet" = "-q"
+"--silent" = "-q"
+"--no-messages" = "--no-messages"
+"--with-filename" = "-H"
+"--no-filename" = "-I"
+"--line-regexp" = "-x"
+"--include" = { to = "-g", value = "any", quote = "always" }
+"--exclude" = { to = "-g", value = "any", quote = "always", prefix = "!" }
+"--exclude-dir" = { to = "-g", value = "any", quote = "always", prefix = "!" }
+"--color" = { to = "--color", value = ["never", "always", "auto"], form = "equals", optional = true }
+"--colour" = { to = "--colour", value = ["never", "always", "auto"], form = "equals", optional = true }
+
+[[deny]]
+name = "guardrails"
+command = ["zgrep", "zegrep", "zfgrep"]
+message = "grep is not allowed here; use rg (e.g. rg -z PATTERN file.gz)."
+
+[[deny]]
+name = "guardrails"
+command = ["sed", "gsed"]
+flags = ["-i", "--in-place"]
+message = "sed -i differs between BSD and GNU. Use the Edit tool or perl -pi -e."
+
+[[deny]]
+name = "guardrails"
+command = "rm"
+aliases = { "-r" = "--recursive", "-R" = "--recursive" }
+flags = ["--recursive"]
+args = ["/", "/*", "~", "~/", "~/*", "$HOME", "$HOME/", "$HOME/*"]
+message = "refusing recursive rm on '{arg}'. Name the exact directory instead."
+
+# Not in bash-guard: a download piped into a shell, at any distance (curl | tee | sudo bash).
+[[ask]]
+name = "guardrails"
+pipe = { from = ["curl", "wget"], to = ["bash", "sh", "zsh", "dash", "ksh"] }
+message = "this pipes a download into a shell."
+
+# Not in bash-guard: writing a .env file, by any tool or redirect; templates are fine.
+[[deny]]
+name = "guardrails"
+path = "/**/.env{,.*}"
+except = ["/**/*.{example,sample,template}"]
+message = "refusing to write {path}; ask the user to edit secrets."
+
+[[deny]]
+name = "guardrails"
+word = { prefix = "--force" }
+message = "--force* flags are not allowed. Find the non-forced way, or ask the user to run it themselves."
+
+[[rewrite]]
+name = "fgrep -> rg"
+like = "grep -> rg"
+command = "fgrep"
+to = "rg"
+add = ["-F"]
+message = "grep is not allowed here; use rg (e.g. rg -F PATTERN [path])."
+note = "rg skips .gitignored and hidden files; add -uu for grep -r behaviour"

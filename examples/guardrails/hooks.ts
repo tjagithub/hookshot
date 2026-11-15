@@ -2,13 +2,14 @@
 import { accessSync, constants } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import process from 'node:process'
-import { type CmdMatch, type Verdict, type WordValue, cmd, couldEqual, deny, display, edit, hooks, pass, path, pipe, rewrite, word } from '../../src/index.ts'
-import { grepToRg } from '../../src/translate/grep-rg.ts'
+import {
+  type CmdMatch, type Verdict, type WordValue, cmd, couldEqual, deny, display, edit, grepToRg, hooks, pass, path, pipe, rewrite, word,
+} from '../../src/index.ts'
 
 const label = 'guardrails'
 const rgNote = 'rg skips .gitignored and hidden files; add -uu for grep -r behaviour'
 
-function onPath(bin: string): boolean {
+export function onPath(bin: string): boolean {
   for (const dir of (process.env.PATH ?? '').split(delimiter)) {
     try {
       accessSync(join(dir, bin), constants.X_OK)
@@ -42,7 +43,7 @@ function plainFile(w: WordValue): boolean {
 }
 
 // sed -n 'A,Bp' FILE -> jouet read FILE --range A:B, only for a plain top-level call.
-function sedRead({ inv }: CmdMatch): Verdict {
+export function sedRead({ inv }: CmdMatch): Verdict {
   const ws = inv.call.words
   const [, flag, range, file] = ws
   if (inv.call.assigns || ws.length !== 4 || !file || !plainFile(file)) return pass()

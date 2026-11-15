@@ -7,23 +7,25 @@ import { tempDirs } from './tmp.ts'
 export const root = fileURLToPath(new URL('../..', import.meta.url))
 export const guardPath = process.env.GUARD ?? join(root, 'reference/bash-guard/bin/bash-guard')
 export const portPath = join(root, 'examples/guardrails/main.ts')
+export const tomlPath = join(root, 'examples/guardrails-toml/main.ts')
 
 export type Parser = 'shfmt' | 'sh-syntax'
 export const parsers: Parser[] = ['shfmt', 'sh-syntax']
 export const hasShfmt = spawnSync('shfmt', ['--version']).status === 0
 export const hasBun = spawnSync('bun', ['--version']).status === 0
 
-/** reference = bash-guard with one of its parsers; port = examples/guardrails with one hookshot backend. */
+/** reference = bash-guard with one of its parsers; port = examples/guardrails (toml: guardrails-toml) with one hookshot backend. */
 export type Impl =
   | { impl: 'reference'; parser: Parser }
-  | { impl: 'port'; backend: 'native' | 'wasm' }
+  | { impl: 'port' | 'toml'; backend: 'native' | 'wasm' }
 export const impls: Impl[] = [
   { impl: 'reference', parser: 'shfmt' },
   { impl: 'reference', parser: 'sh-syntax' },
   { impl: 'port', backend: 'native' },
   { impl: 'port', backend: 'wasm' },
+  { impl: 'toml', backend: 'native' },
 ]
-export const implName = (i: Impl) => (i.impl === 'reference' ? `bash-guard/${i.parser}` : `port/${i.backend}`)
+export const implName = (i: Impl) => (i.impl === 'reference' ? `bash-guard/${i.parser}` : `${i.impl}/${i.backend}`)
 export const available = (i: Impl) => (i.impl === 'reference' ? i.parser !== 'shfmt' || hasShfmt : hasBun)
 
 export interface GuardOptions {
@@ -91,10 +93,10 @@ export function runGuard(command: string, opts: GuardOptions = {}): Promise<Guar
   delete env.GUARD_PARSER
   delete env.HOOKSHOT_PARSER
   if (impl.impl === 'reference' && impl.parser === 'sh-syntax') env.GUARD_PARSER = 'sh-syntax'
-  if (impl.impl === 'port') env.HOOKSHOT_PARSER = impl.backend
+  if (impl.impl !== 'reference') env.HOOKSHOT_PARSER = impl.backend
   env.PATH = opts.jouet === false ? pathWithoutJouet() : pathWithJouet()
   const input = JSON.stringify({ tool_input: { ...opts.toolInput, command } })
-  const [bin, args] = impl.impl === 'reference' ? [guardPath, []] : ['bun', [portPath]]
+  const [bin, args] = impl.impl === 'reference' ? [guardPath, []] : ['bun', [impl.impl === 'port' ? portPath : tomlPath]]
 
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { env })

@@ -22,10 +22,14 @@ beforeAll(() => {
   const out = mk('hookshot-pack-')
   run('pnpm', ['pack', '--pack-destination', out], root)
   const tgz = join(out, readdirSync(out).find((f) => f.endsWith('.tgz'))!)
+  // The one runtime dependency, packed from node_modules so the install stays offline.
+  const deps = mk('hookshot-deps-')
+  run('npm', ['pack', realpathSync(join(root, 'node_modules/smol-toml')), '--pack-destination', deps, '--ignore-scripts'], deps)
+  const toml = join(deps, readdirSync(deps).find((f) => f.endsWith('.tgz'))!)
   files = run('tar', ['-tzf', tgz], out).trim().split('\n')
   proj = realpathSync(mk('hookshot-proj-'))
   writeFileSync(join(proj, 'package.json'), '{"type":"module","private":true}\n')
-  run('npm', ['install', tgz, '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], proj)
+  run('npm', ['install', toml, tgz, '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], proj)
   writeFileSync(
     join(proj, 'rules.ts'),
     "import { cmd, hooks, parserStatus } from '@tjakit/hookshot'\nexport default hooks([cmd('rm').ask('rm')])\nexport const status = parserStatus\n",
@@ -39,7 +43,8 @@ describe('the npm package', () => {
     expect(files).toContain('package/dist/bin/hookshot.js')
     expect(files).toContain('package/native/build/hsparse.wasm')
     expect(files).toContain('package/native/build/wasm_exec.js')
-    expect(files.filter((f) => !/^package\/(dist\/|native\/build\/hsparse|native\/build\/wasm_exec\.js$|package\.json$|README\.md$|LICENSE$)/.test(f))).toEqual([])
+    expect(files).toContain('package/schema/hookshot.schema.json')
+    expect(files.filter((f) => !/^package\/(dist\/|schema\/hookshot\.schema\.json$|native\/build\/hsparse|native\/build\/wasm_exec\.js$|package\.json$|README\.md$|LICENSE$)/.test(f))).toEqual([])
   })
 
   test('node runs the installed CLI on a rules file that imports the package', () => {
@@ -53,6 +58,13 @@ describe('the npm package', () => {
     writeFileSync(join(elsewhere, 'hooks.ts'), "import { cmd, hooks } from '@tjakit/hookshot'\nexport default hooks([cmd('rm').deny('no')])\n")
     const bin = join(proj, 'node_modules/@tjakit/hookshot/dist/bin/hookshot.js')
     expect(run('node', [bin, 'test', 'hooks.ts', 'rm x'], elsewhere)).toBe('deny   rm x\n       [rm] no\n')
+  })
+
+  test('a hookshot.toml from an unrelated directory runs on the installed CLI', () => {
+    const elsewhere = mk('hookshot-toml-')
+    writeFileSync(join(elsewhere, 'hookshot.toml'), 'version = 1\n[[deny]]\ncommand = "rm"\nmessage = "no"\n')
+    const bin = join(proj, 'node_modules/@tjakit/hookshot/dist/bin/hookshot.js')
+    expect(run('node', [bin, 'test', 'hookshot.toml', 'rm x'], elsewhere)).toBe('deny   rm x\n       [rm] no\n')
   })
 
   test('the installed package finds its parser and installs a hook that points into node_modules', async () => {

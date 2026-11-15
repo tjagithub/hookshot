@@ -31,7 +31,7 @@ describe('grepToRg', () => {
     ['grep -Ax f', '-A needs a number'],
     ['grep -A $n f', '-A needs a number'],
     ['grep -m', '-m needs a number'],
-    ['grep x f -i', 'a flag after the pattern'],
+    ['grep x f -i', 'a flag after an argument'],
   ])('%s fails: %s', async (src, why) => {
     expect(grepToRg(await argv(src))).toEqual({ ok: false, why })
   })

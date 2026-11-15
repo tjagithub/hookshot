@@ -3,6 +3,7 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { asking, respond } from '../claude.ts'
 import { homeDir } from '../context.ts'
+import { loadConfig } from '../config/load.ts'
 import type { Hook } from '../hook.ts'
 import { pkgName } from '../root.ts'
 import { install, uninstall } from './install.ts'
@@ -36,9 +37,10 @@ export const processIo = (): Io => ({
 export class UsageError extends Error {}
 
 
-/** A rules file `export default`s a Hook (from hooks()). */
+/** A rules file `export default`s a Hook (from hooks()); a .toml file is a config (see config/load.ts). */
 export async function loadHook(file: string, io: Io): Promise<Hook> {
   const abs = resolve(io.cwd, file)
+  if (abs.endsWith('.toml')) return loadConfig(abs)
   const mod = (await import(pathToFileURL(abs).href).catch((e: unknown) => {
     if (!String(e).includes(pkgName)) throw e
     const hint = 'install it next to the rules file, or run the hook on node (`hookshot install --runtime node`), which resolves it to this CLI'
@@ -53,12 +55,16 @@ export async function loadHook(file: string, io: Io): Promise<Hook> {
 
 const usage = `hookshot: declarative Claude Code hooks
 
-  hookshot run <rules.ts>                  read PreToolUse JSON on stdin, print the decision
-  hookshot test <rules.ts> [command...]    show what the rules decide (commands from stdin if none)
+  <rules> is a .ts/.js file that exports default hooks([...]), or a hookshot.toml config.
+
+  hookshot run <rules>                     read PreToolUse JSON on stdin, print the decision
+  hookshot test <rules> [command...]       show what the rules decide (commands from stdin if none)
       --tool <Write|Edit|Read|...> --path <file>   check a file tool call instead
       --cwd <dir>  --json  --expect <allow|ask|deny>  (exit 1 when a decision differs)
-  hookshot install <rules.ts> [--scope user|project|local] [--runtime bun|node] [--dry-run]
-  hookshot uninstall <rules.ts> [--scope user|project|local] [--dry-run]
+  hookshot check <hookshot.toml>           validate a config and list its rules (exit 1 on errors)
+  hookshot init [hookshot.toml]            write a starter config (never overwrites)
+  hookshot install <rules> [--scope user|project|local] [--runtime bun|node] [--dry-run]
+  hookshot uninstall <rules> [--scope user|project|local] [--dry-run]
   hookshot fetch-parser                    download the prebuilt parser for this platform
 `
 
@@ -82,6 +88,10 @@ export async function main(argv: string[], io: Io = processIo()): Promise<number
       }
       case 'test':
         return await testCommand(rest, io)
+      case 'check':
+        return (await import('./config.ts')).checkCommand(rest, io)
+      case 'init':
+        return (await import('./config.ts')).initCommand(rest, io)
       case 'install':
         return install(rest, io)
       case 'uninstall':
