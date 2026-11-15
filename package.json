@@ -4,6 +4,9 @@
   "private": true,
   "description": "Declarative Claude Code hooks",
   "type": "module",
+  "bin": {
+    "hookshot": "bin/hookshot.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "coverage": "vitest run --coverage",
@@ -26,6 +29,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "fast-check": "^4.10.2",
     "mitata": "^1.0.34",
+    "node-api-headers": "^1.9.0",
     "sh-syntax": "0.8.4",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

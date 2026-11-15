@@ -1,2 +1,6 @@
 node_modules/
 coverage/
+# Built by native/build.sh or fetched by `hookshot fetch-parser`; the wasm fallback stays tracked.
+native/build/*
+!native/build/hsparse.wasm
+!native/build/wasm_exec.js

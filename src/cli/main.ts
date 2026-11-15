@@ -1,0 +1,112 @@
+import { accessSync, constants } from 'node:fs'
+import { delimiter, join, resolve } from 'node:path'
+import process from 'node:process'
+import { pathToFileURL } from 'node:url'
+import { asking, respond } from '../claude.ts'
+import { homeDir } from '../context.ts'
+import type { Hook } from '../hook.ts'
+import { install, uninstall } from './install.ts'
+import { testCommand } from './test.ts'
+
+/** Everything the CLI touches outside itself, so tests can run it in-process. */
+export interface Io {
+  out(s: string): void
+  err(s: string): void
+  stdin(): Promise<string>
+  cwd: string
+  home: string
+  env: Readonly<Record<string, string | undefined>>
+}
+
+export const processIo = (): Io => ({
+  out: (s) => process.stdout.write(s),
+  err: (s) => process.stderr.write(s),
+  async stdin() {
+    let raw = ''
+    for await (const chunk of process.stdin) raw += chunk
+    return raw
+  },
+  cwd: process.cwd(),
+  get home() {
+    return homeDir()
+  },
+  env: process.env,
+})
+
+export class UsageError extends Error {}
+
+export function onPath(bin: string, env: Io['env']): boolean {
+  for (const dir of (env.PATH ?? '').split(delimiter)) {
+    try {
+      accessSync(join(dir, bin), constants.X_OK)
+      return true
+    } catch {}
+  }
+  return false
+}
+
+/** A rules file `export default`s a Hook (from hooks()). */
+export async function loadHook(file: string, io: Io): Promise<Hook> {
+  const abs = resolve(io.cwd, file)
+  const mod = (await import(pathToFileURL(abs).href)) as { default?: unknown }
+  const h = mod.default as Partial<Hook> | undefined
+  if (!h || typeof h.evaluate !== 'function' || typeof h.evaluateFile !== 'function') {
+    throw new UsageError(`${file} must \`export default hooks([...])\``)
+  }
+  return h as Hook
+}
+
+const usage = `hookshot: declarative Claude Code hooks
+
+  hookshot run <rules.ts>                  read PreToolUse JSON on stdin, print the decision
+  hookshot test <rules.ts> [command...]    show what the rules decide (commands from stdin if none)
+      --tool <Write|Edit|Read|...> --path <file>   check a file tool call instead
+      --cwd <dir>  --json  --expect <allow|ask|deny>  (exit 1 when a decision differs)
+  hookshot install <rules.ts> [--scope user|project|local] [--runtime bun|node] [--dry-run]
+  hookshot uninstall <rules.ts> [--scope user|project|local] [--dry-run]
+  hookshot fetch-parser                    download the prebuilt parser for this platform
+`
+
+export async function main(argv: string[], io: Io = processIo()): Promise<number> {
+  const [cmd, ...rest] = argv
+  try {
+    switch (cmd) {
+      case 'run': {
+        // Claude Code lets the call through on most non-zero exits, so a broken rules file must ask instead.
+        let hook: Hook
+        try {
+          if (!rest[0]) throw new UsageError('run needs a rules file')
+          hook = await loadHook(rest[0], io)
+        } catch (e) {
+          const why = `hookshot could not load its rules, so it cannot vouch for this call: ${e instanceof Error ? e.message : String(e)}`
+          io.out(`${JSON.stringify(asking(why))}\n`)
+          return 0
+        }
+        io.out(await respond(hook, await io.stdin()))
+        return 0
+      }
+      case 'test':
+        return await testCommand(rest, io)
+      case 'install':
+        return install(rest, io)
+      case 'uninstall':
+        return uninstall(rest, io)
+      case 'fetch-parser':
+        return await (await import('./fetch-parser.ts')).fetchParser(rest, io)
+      case undefined:
+      case '-h':
+      case '--help':
+      case 'help':
+        io.out(usage)
+        return cmd === undefined ? 2 : 0
+      default:
+        throw new UsageError(`unknown command ${cmd}`)
+    }
+  } catch (e) {
+    const parseError = (e as { code?: unknown }).code?.toString().startsWith('ERR_PARSE_ARGS')
+    if (!(e instanceof UsageError) && !parseError) throw e
+    if (!(e instanceof Error)) throw e
+    io.err(`hookshot: ${e.message}\n\n${usage}`)
+    return 2
+  }
+}

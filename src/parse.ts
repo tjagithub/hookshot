@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { File } from './ast.ts'
@@ -48,9 +48,28 @@ const dispatch = (b: Backend, e: BackendEvent) => {
   slots[b].status = next(slots[b].status, e)
 }
 
+/** The prebuilt addon for a platform, as CI and `hookshot fetch-parser` name it. */
+export const nativeAsset = (platform: string = process.platform, arch: string = process.arch) => `hsparse-${platform}-${arch}.node`
+let nativeFile: string | undefined
+
+// The platform build first, then a local build.sh output; a file that exists but won't load is an error, not skipped.
 function startNative(): RawParse {
-  const addon = createRequire(import.meta.url)(fileURLToPath(new URL('hsparse.node', buildDir)))
-  return addon.parse as RawParse
+  const req = createRequire(import.meta.url)
+  const errors: unknown[] = []
+  for (const name of [nativeAsset(), 'hsparse.node']) {
+    const file = fileURLToPath(new URL(name, buildDir))
+    if (!existsSync(file)) continue
+    try {
+      const addon = req(file) as { parse: RawParse }
+      nativeFile = file
+      return addon.parse
+    } catch (e) {
+      errors.push(e)
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length) throw new AggregateError(errors, 'native addon did not load')
+  throw new Error(`no ${nativeAsset()} in ${fileURLToPath(buildDir)}; run native/build.sh or hookshot fetch-parser`)
 }
 
 // The Go program hands over its parse function during go.run(); exiting later moves the slot to exited.
@@ -156,8 +175,8 @@ export async function activeBackend(): Promise<Backend> {
 }
 
 /** Snapshot of both backends, for diagnostics: why wasm, when native was expected. */
-export function parserStatus(): { active?: Backend; native: BackendState; wasm: BackendState } {
-  return { active, native: slots.native.status, wasm: slots.wasm.status }
+export function parserStatus(): { active?: Backend; native: BackendState; wasm: BackendState; nativeFile?: string } {
+  return { active, native: slots.native.status, wasm: slots.wasm.status, ...(nativeFile ? { nativeFile } : {}) }
 }
 
 const dialects: ReadonlyArray<readonly [Dialect, number]> = [
