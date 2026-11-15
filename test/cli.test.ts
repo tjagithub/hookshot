@@ -44,12 +44,21 @@ describe('hookshot test', () => {
     [['test', rules, '--expect', 'maybe', 'ls'], /--expect must be/],
     [['test', rules, '--nope'], /Unknown option/],
     [['test', join(repo, 'package.json'), 'ls'], /must `export default hooks/],
+    [['test', 'no-such-rules.ts', 'ls'], /^hookshot: no such rules file: no-such-rules\.ts/],
+    [['test', 'no-such.toml', 'ls'], /^hookshot: no such rules file: no-such\.toml/],
     [['frobnicate'], /unknown command/],
   ])('%j is a usage error', async (args, msg) => {
     const t = io()
     expect(await main(args, t.io)).toBe(2)
     expect(t.err()).toMatch(msg)
   })
+})
+
+test('a rules file that imports another missing package gets no hookshot hint', async () => {
+  const dir = tmp()
+  writeFileSync(join(dir, 'r.ts'), "import 'no-such-pkg-hs'\nexport default {}\n")
+  await expect(main(['test', join(dir, 'r.ts'), 'ls'], io().io)).rejects.toThrow(/no-such-pkg-hs/)
+  await expect(main(['test', join(dir, 'r.ts'), 'ls'], io().io)).rejects.not.toThrow(/install it next to the rules file/)
 })
 
 describe('hookshot run', () => {

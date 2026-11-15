@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
@@ -40,9 +41,11 @@ export class UsageError extends Error {}
 /** A rules file `export default`s a Hook (from hooks()); a .toml file is a config (see config/load.ts). */
 export async function loadHook(file: string, io: Io): Promise<Hook> {
   const abs = resolve(io.cwd, file)
+  if (!existsSync(abs)) throw new UsageError(`no such rules file: ${file}`)
   if (abs.endsWith('.toml')) return loadConfig(abs)
   const mod = (await import(pathToFileURL(abs).href).catch((e: unknown) => {
-    if (!String(e).includes(pkgName)) throw e
+    // Only when the package is the specifier that failed: node's "imported from" path can contain it too.
+    if (!new RegExp(`['"]${pkgName}['"/]`).test(String(e))) throw e
     const hint = 'install it next to the rules file, or run the hook on node (`hookshot install --runtime node`), which resolves it to this CLI'
     throw new Error(`${file} imports ${pkgName}, which this runtime cannot find: ${hint}`, { cause: e })
   })) as { default?: unknown }
