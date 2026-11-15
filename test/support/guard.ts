@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { tempDirs } from './tmp.ts'
 
 export const root = fileURLToPath(new URL('../..', import.meta.url))
 export const guardPath = process.env.GUARD ?? join(root, 'reference/bash-guard/bin/bash-guard')
@@ -45,11 +45,12 @@ export interface GuardResult {
   stderr: string
 }
 
+const tmp = tempDirs()
 let noJouetBin: string | undefined
 // A PATH with the guard's tools but without jouet, like the nojouet case in test-bash-guard.sh.
 function pathWithoutJouet(): string {
   if (!noJouetBin) {
-    noJouetBin = mkdtempSync(join(tmpdir(), 'hookshot-nojouet-'))
+    noJouetBin = tmp('hookshot-nojouet-')
     for (const tool of ['shfmt', 'jq', 'bun', 'node', 'bash']) {
       const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).stdout.trim()
       if (found) symlinkSync(found, join(noJouetBin, tool))
@@ -62,7 +63,7 @@ let stubJouetBin: string | undefined
 // Both guards only check that jouet is on PATH, so a stub keeps the tests independent of this machine.
 function pathWithJouet(): string {
   if (!stubJouetBin) {
-    stubJouetBin = mkdtempSync(join(tmpdir(), 'hookshot-jouet-'))
+    stubJouetBin = tmp('hookshot-jouet-')
     writeFileSync(join(stubJouetBin, 'jouet'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   }
   return `${stubJouetBin}:${process.env.PATH ?? ''}`

@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { hooks } from '../src/hook.ts'
 import { cmd } from '../src/rules/cmd.ts'
 import { type Store, duration, fileStore } from '../src/state.ts'
+import { tempDirs } from './support/tmp.ts'
 
-const tmp = () => mkdtempSync(join(tmpdir(), 'hookshot-state-'))
+const mk = tempDirs()
+const tmp = () => mk('hookshot-state-')
 const rmr = () => cmd('rm').flags({ aliases: { '-r': '--recursive' } }).withFlag('--recursive')
 
 describe('escalate', () => {

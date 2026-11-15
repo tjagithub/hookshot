@@ -1,17 +1,18 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { fetchParser } from '../src/cli/fetch-parser.ts'
 import { matcher } from '../src/cli/install.ts'
 import { type Io, main } from '../src/cli/main.ts'
+import { tempDirs } from './support/tmp.ts'
 
 const repo = fileURLToPath(new URL('..', import.meta.url))
 const rules = join(repo, 'examples/guardrails/hooks.ts')
-const tmp = () => mkdtempSync(join(tmpdir(), 'hookshot-cli-'))
+const mk = tempDirs()
+const tmp = () => mk('hookshot-cli-')
 
 function io(over: Partial<Io> = {}, stdin = '') {
   const out: string[] = []
