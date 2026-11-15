@@ -3,14 +3,15 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { nativeAsset } from '../parse.ts'
+import { buildDir, pkgRoot } from '../root.ts'
 import { type Io, UsageError } from './main.ts'
 
 export const releases = 'https://github.com/tjagithub/hookshot/releases/download'
 export const supported = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
 
-const buildDir = () => fileURLToPath(new URL('../../native/build/', import.meta.url))
+const buildPath = () => fileURLToPath(buildDir)
 const pkgVersion = () =>
-  (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version
+  (JSON.parse(readFileSync(new URL('package.json', pkgRoot), 'utf8')) as { version: string }).version
 
 /** Download the prebuilt addon for this platform from the release matching the package version; verify its SHA-256. */
 export async function fetchParser(args: string[], io: Io, fetchFn: typeof fetch = fetch): Promise<number> {
@@ -45,7 +46,7 @@ export async function fetchParser(args: string[], io: Io, fetchFn: typeof fetch 
   const got = createHash('sha256').update(bytes).digest('hex')
   if (got !== want) throw new UsageError(`${asset}: SHA-256 is ${got}, SHA256SUMS says ${want}; not installed`)
 
-  const dir = values.dir ?? buildDir()
+  const dir = values.dir ?? buildPath()
   mkdirSync(dir, { recursive: true })
   const tmp = `${dir}/.${asset}.${process.pid}`
   writeFileSync(tmp, bytes)

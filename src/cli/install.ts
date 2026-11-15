@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { fileTools } from '../claude.ts'
+import { binUrl } from '../root.ts'
 import { type Io, UsageError, onPath } from './main.ts'
 
 export const matcher = ['Bash', ...Object.keys(fileTools)].join('|')
@@ -24,7 +25,7 @@ interface Settings {
   [k: string]: unknown
 }
 
-export const binPath = () => fileURLToPath(new URL('../../bin/hookshot.ts', import.meta.url))
+export const binPath = () => fileURLToPath(binUrl)
 
 export function settingsPath(scope: Scope, io: Io): string {
   if (scope === 'user') return join(io.home, '.claude', 'settings.json')
@@ -38,7 +39,7 @@ function portable(abs: string, scope: Scope, io: Io): string {
   return `\${CLAUDE_PROJECT_DIR}/${rel.split(sep).join('/')}`
 }
 
-const isOurs = (h: CommandHook, rules: string) => h.args?.[1] === 'run' && /hookshot\.ts$/.test(h.args[0] ?? '') && h.args[2] === rules
+const isOurs = (h: CommandHook, rules: string) => h.args?.[1] === 'run' && /hookshot\.[jt]s$/.test(h.args[0] ?? '') && h.args[2] === rules
 
 function read(file: string): Settings {
   if (!existsSync(file)) return {}

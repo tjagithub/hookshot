@@ -6,7 +6,7 @@ The design rule is **never fail open**. When hookshot cannot decide (a dynamic w
 
 ```ts
 // hooks.ts
-import { cmd, deny, edit, hooks, path, pipe, rewrite } from 'hookshot'
+import { cmd, deny, edit, hooks, path, pipe, rewrite } from '@tjakit/hookshot'
 
 export default hooks([
   cmd('git', 'push')
@@ -54,20 +54,22 @@ Things to note in this output:
 
 ## Install
 
-hookshot is not on npm yet (`"private": true`). Clone it, then:
+Your rules file imports the package, so install it where that file can resolve it. A global install is not enough. For rules of your own across all projects:
 
 ```sh
-pnpm install
-bun bin/hookshot.ts fetch-parser     # optional: the native parser for this platform
-bun bin/hookshot.ts install path/to/hooks.ts --scope project
+mkdir -p ~/.claude/hookshot && cd ~/.claude/hookshot
+npm init -y && npm install @tjakit/hookshot
+# write hooks.ts here, then:
+npx hookshot test hooks.ts 'git push -f'
+npx hookshot install hooks.ts --scope user
 ```
 
-Until it is published, import from `src/index.ts` by path in your rules file (`import { … } from '/path/to/hookshot/src/index.ts'`).
+For a project, add it as a dev dependency and use `--scope project`. The package includes the native parsers for darwin and linux (arm64 and x64) and the WASM fallback, so nothing is downloaded at install time.
 
 Requirements:
 
 - **Claude Code v2.1.295 or later.** Older versions have no `onFailure` field, so there a hook that cannot start (no runtime, a moved file, a timeout) lets the tool call through.
-- **A runtime:** bun, node (with type stripping) or deno. The CLI runs on bun by default.
+- **A runtime:** node 22.18 or later (it strips the types of your `hooks.ts`), bun or deno. The hook runs on bun when it is on `PATH`, else node; `--runtime` chooses.
 
 ## Rules
 
@@ -156,7 +158,7 @@ You can also use it from code: `hooks()` returns a `Hook` with `evaluate(command
 
 The parser is mvdan/sh v3.14.1, compiled from Go in two forms:
 
-- **Native Node-API addon** `native/build/hsparse-<platform>-<arch>.node`. This is the fast one (cold start about 12 ms). `hookshot fetch-parser` gets it from the GitHub release that matches the package version and checks its SHA-256. It is built for darwin-arm64, darwin-x64, linux-arm64 and linux-x64.
+- **Native Node-API addon** `native/build/hsparse-<platform>-<arch>.node`. This is the fast one (cold start about 12 ms). The npm package includes it. In a git clone, `hookshot fetch-parser` gets it from the GitHub release that matches the package version and checks its SHA-256. It is built for darwin-arm64, darwin-x64, linux-arm64 and linux-x64.
 - **WASM fallback** `native/build/hsparse.wasm`, tracked in git, so a fresh clone parses straight away (on Windows too).
 
 `parserStatus()` says which backend loaded, and why the others did not. To build them yourself, see [Development](#development).

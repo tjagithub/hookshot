@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { File } from './ast.ts'
 import { type BackendEvent, type BackendState, next } from './backend-state.ts'
+import { buildDir } from './root.ts'
 
 export type { BackendState } from './backend-state.ts'
 export type Dialect = 'zsh' | 'bash'
@@ -31,7 +32,6 @@ declare global {
   var __hookshotRegister: ((fn: RawParse) => void) | undefined
 }
 
-const buildDir = new URL('../native/build/', import.meta.url)
 const toError = (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
 
 interface Slot {
