@@ -3,7 +3,7 @@ import { describe, expect } from 'vitest'
 import type { Word } from '../src/ast.ts'
 import { hasFlag, parseFlags } from '../src/flags.ts'
 import { parse } from '../src/parse.ts'
-import { couldEqual, display, wordValue } from '../src/word.ts'
+import { braceExpansion, couldEqual, display, wordValue } from '../src/word.ts'
 import { unwrap } from '../src/wrappers.ts'
 
 /** Words of the first command in `src`. */
@@ -51,6 +51,27 @@ describe('wordValue', () => {
     expect(w?.glob).toBe(glob)
   })
 
+  test.each([
+    ['a{b,c}', ['ab', 'ac']],
+    ['{a,{b,c}}d', ['ad', 'bd', 'cd']],
+    ['x{,.bak}', ['x', 'x.bak']],
+    ['{a,"b"}', 'dynamic'],
+    ['f{1..3}', 'dynamic'],
+    ['$x{a,b}', 'dynamic'],
+    ['{x}', undefined],
+    ['"{a,b}"', undefined],
+    ['\\{a,b\\}', undefined],
+    ['plain', undefined],
+  ])('braceExpansion(%s) is %j', async (src, want) => {
+    const [, w] = await words(`x ${src}`)
+    expect(braceExpansion(w!)).toEqual(want)
+  })
+
+  test('braceExpansion past the alternatives bound is dynamic', async () => {
+    const [, w] = await words(`x ${'{a,b}'.repeat(7)}`)
+    expect(braceExpansion(w!)).toBe('dynamic')
+  })
+
   test('couldEqual treats holes as any text', async () => {
     const [, a, b, c] = await words('x "$X" "$X/*" "$tmp/build"')
     expect(couldEqual(a!, ['/'])).toBe(true)
@@ -72,7 +93,10 @@ describe('unwrap', () => {
   test.each([
     ['sudo -u root grep a', 'run', 'grep a', ['sudo']],
     ['sudo -uroot env -i A=1 B=2 timeout -s KILL 5 nice -n 3 grep a', 'run', 'grep a', ['sudo', 'env', 'timeout', 'nice']],
-    ['xargs -0 -I {} rm {}', 'run', 'rm {}', ['xargs']],
+    // xargs adds words from its input: one run-time word (also with -I, where it errs toward asking).
+    ['xargs -0 -I {} rm {}', 'run', 'rm {} <xargs input>', ['xargs']],
+    ['sudo xargs -n1 rm -rf', 'run', 'rm -rf <xargs input>', ['sudo', 'xargs']],
+    ['=rm -rf x', 'run', '=rm -rf x', []],
     ['repeat 3 rm -rf x', 'run', 'rm -rf x', ['repeat']],
     ['command grep a', 'run', 'grep a', ['command']],
     ['command -v grep', 'none', '', ['command']],

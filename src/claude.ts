@@ -3,6 +3,7 @@ import { type Context, context } from './context.ts'
 import type { Hook } from './hook.ts'
 import { type FileOp, type FileTarget, resolvePath } from './paths.ts'
 import type { Outcome, Reason } from './verdict.ts'
+import { visible } from './visible.ts'
 
 /** The PreToolUse output Claude Code reads, or null for "no opinion" (print nothing). */
 export interface PreToolUseOutput {
@@ -27,16 +28,16 @@ export const fileTools: Readonly<Record<string, FileOp>> = {
   Write: 'write', Edit: 'write', MultiEdit: 'write', NotebookEdit: 'write', Read: 'read',
 }
 
-const join = (rs: Reason[]) => rs.map((r) => `[${r.rule}] ${r.message}`).join('\n')
+const join = (rs: Reason[]) => rs.map((r) => `[${visible(r.rule)}] ${visible(r.message)}`).join('\n')
 
 function contextText(notes: Reason[], command?: string): string | undefined {
-  const parts = [...(notes.length ? [join(notes)] : []), ...(command !== undefined ? [`hookshot ran: ${command}`] : [])]
+  const parts = [...(notes.length ? [join(notes)] : []), ...(command !== undefined ? [`hookshot ran: ${visible(command, { keepLines: true })}`] : [])]
   return parts.length ? parts.join('\n') : undefined
 }
 
 const base = { hookEventName: 'PreToolUse' as const }
 export const asking = (reason: string): PreToolUseOutput => ({
-  hookSpecificOutput: { ...base, permissionDecision: 'ask', permissionDecisionReason: reason },
+  hookSpecificOutput: { ...base, permissionDecision: 'ask', permissionDecisionReason: visible(reason) },
 })
 
 // A rewrite alone sets no permissionDecision, so Claude Code's normal permission checks still apply.

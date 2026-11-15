@@ -1,4 +1,5 @@
 import type { Call, Unknown } from './extract.ts'
+import { braceExpansion } from './word.ts'
 
 /** Replace bytes [start, end) of the original command with text. Offsets are UTF-8 bytes. */
 export interface Edit {
@@ -41,9 +42,13 @@ export function combine(...vs: Verdict[]): Verdict {
   return out
 }
 
-/** An edit of [start, end) in one call's script, or null when that text cannot be edited in place. */
+/**
+ * An edit of [start, end) in one call's script, or null when that text cannot be edited in place. A brace word
+ * ({a,b}) is several argv words with one span, so an edit touching it is null too.
+ */
 export function edit(call: Call, start: number, end: number, text: string): Edit | null {
   if (call.base === null) return null
+  if (call.words.some((w) => w.start < Math.max(end, start + 1) && start < w.end && braceExpansion(w) !== undefined)) return null
   if (call.origin.kind === 'single-quoted' && text.includes("'")) return null
   return { start: call.base + start, end: call.base + end, text }
 }

@@ -236,7 +236,7 @@ function rewriteRule(r: RewriteItem): Rule {
     const more = m.rest < argv.length
     const end = more ? argv[m.rest]!.start : argv.at(-1)!.end
     const e = edit(call, argv[0]!.start, end, `${[r.to, ...m.out].join(' ')}${more ? ' ' : ''}`)
-    if (!e) return refuse(call.origin.kind === 'opaque' ? "inside a double-quoted or eval'd command" : 'inside a quoted command, needs quoting changes')
+    if (!e) return refuse(call.origin.kind === 'opaque' ? "inside a double-quoted or eval'd command" : 'cannot be rewritten in place (quoting changes or {a,b} braces)')
     return rewrite([{ ...e, rule: rule.name }], r.note ? [{ rule: rule.name, message: r.note }] : [])
   })
 }

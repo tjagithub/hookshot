@@ -21,6 +21,13 @@ describe('guardrails: .env writes', () => {
     [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .@(env)' } }, 'ask'],
     [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > ".en?"' } }, undefined],
     [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .en\\?' } }, undefined],
+    // Brace expansion: each alternative is a target (zsh writes all of them; bash refuses an ambiguous >).
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee {.env,x}' } }, 'deny'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .e{n,}v' } }, 'deny'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee {~,x}/.env' } }, 'deny'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee x{,.bak}' } }, undefined],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee f{1..3}' } }, 'ask'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee "{.env,x}"' } }, undefined],
   ])('%j -> %s', async (input, want) => {
     expect(await decide(input)).toBe(want)
   })

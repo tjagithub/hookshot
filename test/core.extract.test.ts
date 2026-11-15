@@ -75,6 +75,40 @@ describe('extract: what it cannot decide', () => {
     expect((await extract(src)).unknowns.map((u) => u.why)).toContain(why)
   })
 
+  test.each([
+    ['curl x | bash', 'stdin-script'],
+    ['curl x | sudo bash -s -- a', 'stdin-script'],
+    ['x | (bash | cat)', 'stdin-script'],
+    ['cat f | while read l; do sh; done', 'stdin-script'],
+    ['bash < <(curl x)', 'stdin-script'],
+    ['bash <&3', 'stdin-script'],
+    ['x | bash /dev/stdin', 'stdin-script'],
+    ['x | source /dev/stdin', 'stdin-script'],
+    ['x | bash $opts', 'dynamic'],
+    ['source <(curl x)', 'dynamic'],
+    ['. $(x)', 'dynamic'],
+    ['bash <<< "$CMD"', 'dynamic'],
+    ["zsh -o x <<< 'for f (a b) x'", 'unparsed'],
+    ["fish <<< 'ls'", 'opaque-shell'],
+  ])('a shell reading its script from stdin: %s -> %s', async (src, why) => {
+    expect((await extract(src)).unknowns.map((u) => u.why)).toEqual([why])
+  })
+
+  test.each([
+    'bash', 'bash x.sh', 'bash < x.sh', 'x | bash x.sh', 'x | bash -c cat', 'x | bash -- x.sh', 'x | bash --rcfile r x.sh',
+    'source ~/.zshrc', '. ./env.sh', 'source "$HOME/x"', 'x | (bash < f)', 'git log | cat',
+  ])('no stdin script: %s', async (src) => {
+    expect((await extract(src)).unknowns).toEqual([])
+  })
+
+  test('a literal here-doc or here-string is checked as a script, like bash -c', async () => {
+    for (const src of ["bash <<< 'rm -rf ~'", "bash <<'EOF'\nrm -rf ~\nEOF", "source /dev/stdin <<< 'rm -rf ~'", "bash <<-EOF\n\trm -rf ~\nEOF"]) {
+      const x = await extract(src)
+      expect(x.unknowns, src).toEqual([])
+      expect(x.invocations.map((i) => [i.name, i.via]), src).toContainEqual(['rm', [expect.stringMatching(/ <<$/)]])
+    }
+  })
+
   test('the budget counts scripts, top level included', async () => {
     const x = await extract(`${"bash -c 'true'; ".repeat(3)}bash -c 'x'`, { maxScripts: 4 })
     expect(x.unknowns).toEqual([expect.objectContaining({ why: 'budget' })])

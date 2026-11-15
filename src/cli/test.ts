@@ -4,16 +4,18 @@ import { fileTools } from '../claude.ts'
 import { context } from '../context.ts'
 import { resolvePath } from '../paths.ts'
 import type { Outcome } from '../verdict.ts'
+import { visible } from '../visible.ts'
 import { type Io, UsageError, loadHook } from './main.ts'
 
 const decisions = ['allow', 'ask', 'deny'] as const
 type Decision = (typeof decisions)[number]
 
 function render(input: string, o: Outcome): string {
-  const lines = [`${o.decision.padEnd(6)} ${input}`]
-  if (o.decision !== 'deny' && o.command !== undefined) lines.push(`       -> ${o.command}`)
-  if (o.decision !== 'allow') for (const r of o.reasons) lines.push(`       [${r.rule}] ${r.message}`)
-  if (o.decision !== 'deny') for (const n of o.notes) lines.push(`       note [${n.rule}] ${n.message}`)
+  const v = (s: string) => visible(s)
+  const lines = [`${o.decision.padEnd(6)} ${visible(input, { keepLines: true })}`]
+  if (o.decision !== 'deny' && o.command !== undefined) lines.push(`       -> ${visible(o.command, { keepLines: true })}`)
+  if (o.decision !== 'allow') for (const r of o.reasons) lines.push(`       [${v(r.rule)}] ${v(r.message)}`)
+  if (o.decision !== 'deny') for (const n of o.notes) lines.push(`       note [${v(n.rule)}] ${v(n.message)}`)
   return `${lines.join('\n')}\n`
 }
 

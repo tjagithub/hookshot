@@ -1,15 +1,15 @@
 import type { BinaryCmd, CallExpr, Command, IfClause, Redirect, Stmt } from './ast.ts'
 import { isNode, unhandled } from './ast.ts'
 import { type Parsed, parse as defaultParse } from './parse.ts'
-import { type WordValue, wordValue } from './word.ts'
-import { commandName, findExecs, opaqueShells, parsedShells, shellScriptWord, unwrap } from './wrappers.ts'
+import { type WordValue, display, expandArgv, wordValue } from './word.ts'
+import { commandName, findExecs, opaqueShells, parsedShells, shellScriptWord, shellStdin, stdinFiles, unwrap } from './wrappers.ts'
 
 /** Where a script's text lives in the original command, which decides if it can be edited in place. */
 export type Origin = { kind: 'top' } | { kind: 'single-quoted'; base: number } | { kind: 'opaque' }
 
 export type UnknownWhy =
   | 'unparsed' | 'budget' | 'unsupported-syntax' | 'dynamic' | 'opaque-wrapper' | 'opaque-shell'
-  | 'parser-unavailable' | 'rule-error' | 'edit-conflict' | 'state-unavailable'
+  | 'parser-unavailable' | 'rule-error' | 'edit-conflict' | 'state-unavailable' | 'stdin-script'
 export interface Unknown {
   why: UnknownWhy
   detail: string
@@ -21,6 +21,8 @@ export interface RedirectInfo {
   kind: RedirectKind
   fd?: string
   target?: WordValue
+  /** The text of a here-document (<<, <<-). For <<< the text is the target. */
+  body?: WordValue
   script: number
   origin: Origin
 }
@@ -96,6 +98,28 @@ interface Ctx {
   stages: Invocation[][]
   pipeline?: { id: number; stage: number }
   via: string[]
+  /** Where commands here read stdin from, when it is not inherited from the hook. */
+  stdin?: Stdin
+}
+
+/** A statement's stdin: literal or dynamic text (<<, <<<), a file (<), a pipe, or something else (<&3). */
+export type Stdin =
+  | { kind: 'text'; word: WordValue }
+  | { kind: 'file'; word: WordValue }
+  | { kind: 'pipe' }
+  | { kind: 'other'; op: string }
+
+// The last redirect of fd 0 wins, as in the shell.
+function stdinOf(redirects: readonly RedirectInfo[]): Stdin | undefined {
+  let out: Stdin | undefined
+  for (const r of redirects) {
+    if (r.fd !== undefined && r.fd !== '0') continue
+    if (r.op === '<<<' && r.target) out = { kind: 'text', word: r.target }
+    else if ((r.op === '<<' || r.op === '<<-') && r.body) out = { kind: 'text', word: r.body }
+    else if ((r.op === '<' || r.op === '<>') && r.target) out = { kind: 'file', word: r.target }
+    else if (r.op === '<&' || r.op === '<<' || r.op === '<<-') out = { kind: 'other', op: r.op }
+  }
+  return out
 }
 
 const truncate = (s: string) => (s.length > 60 ? `${s.slice(0, 57)}...` : s)
@@ -160,12 +184,32 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     const script = shellScriptWord(u.argv)
     if (name && script && parsedShells.has(name)) await nested(script, `${name} -c`, { ...ctx, via: chain })
     if (name && script && opaqueShells.has(name)) unknown('opaque-shell', `${name} -c is not bash or zsh`)
+    const shell = name !== undefined && (parsedShells.has(name) || opaqueShells.has(name))
+    if (shell && !script) await stdinScript(name, parsedShells.has(name), shellStdin(u.argv), { ...ctx, via: chain })
+    if (name === 'source' || name === '.') await sourced(name, u.argv[1], { ...ctx, via: chain })
     if (name === 'eval') {
       const args = u.argv.slice(1)
       const dyn = args.find((w) => w.kind === 'dynamic')
       if (dyn) unknown('dynamic', `eval ${dyn.kind === 'dynamic' ? dyn.hint : ''}`)
       else await nested(args.map((w) => (w.kind === 'literal' ? w.text : '')).join(' '), 'eval', { ...ctx, via: chain })
     }
+  }
+
+  // A shell (or source) reading its script from stdin: literal text is parsed like -c; a pipe or a run-time file is unknown.
+  // A literal file (bash < x.sh) is like bash x.sh: a program file, which hookshot does not read.
+  async function stdinScript(name: string, parsed: boolean, reads: boolean | 'unknown', ctx: Ctx) {
+    const src = ctx.stdin
+    if (!src || reads === false) return
+    if (src.kind === 'file' && src.word.kind === 'literal') return
+    if (reads === 'unknown') return unknown('dynamic', `${name} with run-time flags may read its script from stdin`)
+    if (src.kind === 'text') return parsed ? nested(src.word, `${name} <<`, ctx) : unknown('opaque-shell', `${name} script on stdin is not bash or zsh`)
+    const from = src.kind === 'pipe' ? 'a pipe' : src.kind === 'file' ? display(src.word) : src.op
+    unknown('stdin-script', `${name} reads its script from ${from}, which hookshot cannot see`)
+  }
+
+  async function sourced(name: string, file: WordValue | undefined, ctx: Ctx) {
+    if (file?.kind === 'literal') return stdinFiles.has(file.text) ? stdinScript(name, true, true, ctx) : undefined
+    if (file?.segments.some((s) => typeof s !== 'string' && s.dynamic === '$(…)')) unknown('dynamic', `${name} ${file.hint}`)
   }
 
   async function walkCall(cmd: CallExpr, stmt: Omit<Call, 'id' | 'words' | 'assigns' | 'standalone'>, alone: boolean, ctx: Ctx) {
@@ -175,7 +219,7 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     if (!words.length) return
     const call: Call = { ...stmt, id: out.calls.length, words, assigns: cmd.Assigns?.length ?? 0, standalone: alone }
     out.calls.push(call)
-    await invoke(words, call, ctx.via, ctx)
+    await invoke(expandArgv(words), call, ctx.via, ctx)
   }
 
   async function walkIf(c: IfClause, ctx: Ctx) {
@@ -188,16 +232,19 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     for (const s of stmts) await walkStmt(s, ctx, standalone)
   }
 
-  async function walkStmt(s: Stmt, ctx: Ctx, standalone: boolean): Promise<void> {
+  async function walkStmt(s: Stmt, at: Ctx, standalone: boolean): Promise<void> {
     const background = Boolean(s.Background || s.Disown || s.Coprocess)
     const negated = Boolean(s.Negated)
     const redirects = (s.Redirs ?? []).map((r: Redirect): RedirectInfo => {
       const target = r.Word ? wordValue(r.Word) : undefined
-      const info: RedirectInfo = { op: r.Op, kind: classifyRedirect(r.Op, target), script: ctx.script, origin: ctx.origin }
+      const info: RedirectInfo = { op: r.Op, kind: classifyRedirect(r.Op, target), script: at.script, origin: at.origin }
       if (target) info.target = target
+      if (r.Hdoc) info.body = wordValue(r.Hdoc)
       if (r.N?.Value) info.fd = r.N.Value
       return info
     })
+    const own = stdinOf(redirects)
+    const ctx: Ctx = own ? { ...at, stdin: own } : at
     out.redirects.push(...redirects)
     await scan(s.Redirs, ctx)
     const alone = standalone && !background && !negated && !redirects.length && !ctx.inSubst && ctx.origin.kind === 'top'
@@ -257,7 +304,8 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     for (const [i, stage] of flat(s).entries()) {
       const collected: Invocation[] = []
       pipeline.stages.push(collected)
-      await walkStmt(stage, { ...ctx, stages: [...ctx.stages, collected], pipeline: { id: pipeline.id, stage: i } }, false)
+      const stdin: Pick<Ctx, 'stdin'> = i > 0 ? { stdin: { kind: 'pipe' } } : {}
+      await walkStmt(stage, { ...ctx, ...stdin, stages: [...ctx.stages, collected], pipeline: { id: pipeline.id, stage: i } }, false)
     }
   }
 

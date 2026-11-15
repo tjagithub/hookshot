@@ -1,4 +1,4 @@
-import { type WordValue, display } from './word.ts'
+import { type WordValue, display, inputWord, withHole, zshEquals } from './word.ts'
 
 export interface WrapperSpec {
   /** Short flags that take a value, in the same word (`-uroot`) or the next one (`-u root`). */
@@ -13,6 +13,8 @@ export interface WrapperSpec {
   noRun?: readonly string[]
   /** Flags whose value is a command line we cannot see into (`env -S`). */
   opaque?: readonly string[]
+  /** Appends words read from stdin to the command (xargs): one run-time word in argv. */
+  appendsInput?: boolean
 }
 
 export const wrappers: Readonly<Record<string, WrapperSpec>> = {
@@ -28,8 +30,8 @@ export const wrappers: Readonly<Record<string, WrapperSpec>> = {
     assignments: true,
     opaque: ['-S', '--split-string'],
   },
-  xargs: { valueFlags: 'ILnPsdEJRSa' },
-  gxargs: { valueFlags: 'ILnPsdEJRSa' },
+  xargs: { valueFlags: 'ILnPsdEJRSa', appendsInput: true },
+  gxargs: { valueFlags: 'ILnPsdEJRSa', appendsInput: true },
   nice: { valueFlags: 'n', valueLongFlags: ['--adjustment'] },
   nohup: { valueFlags: '' },
   builtin: { valueFlags: '' },
@@ -50,10 +52,10 @@ export const opaqueShells: ReadonlySet<string> = new Set(['fish', 'nu', 'pwsh', 
 
 export const findExecFlags: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 
-/** Basename of a command word when its last path segment is literal, else undefined. */
+/** Basename of a command word when its last path segment is literal, else undefined. zsh =rm is rm. */
 export function commandName(w: WordValue | undefined): string | undefined {
   if (!w) return undefined
-  if (w.kind === 'literal') return w.text.split('/').pop()
+  if (w.kind === 'literal') return (zshEquals(w) ? w.text.slice(1) : w.text).split('/').pop()
   const last = w.segments.at(-1)
   if (typeof last !== 'string' || !last.includes('/')) return undefined
   return last.split('/').pop()
@@ -112,10 +114,15 @@ function wrapperEnd(spec: WrapperSpec, name: string, argv: WordValue[], via: str
 export function unwrap(argv: WordValue[], table: Readonly<Record<string, WrapperSpec>> = wrappers): Unwrapped {
   const via: string[] = []
   let rest = argv
+  let input = false
   for (;;) {
     const name = commandName(rest[0])
     const spec = name !== undefined && rest[0]?.kind === 'literal' ? table[name] : undefined
-    if (!spec || name === undefined) return rest.length ? { kind: 'run', argv: rest, via } : { kind: 'none', via }
+    if (!spec || name === undefined) {
+      if (!rest.length) return { kind: 'none', via }
+      return { kind: 'run', argv: input ? [...rest, inputWord(rest.at(-1)!, '<xargs input>')] : rest, via }
+    }
+    input ||= spec.appendsInput === true
     via.push(name)
     const end = wrapperEnd(spec, name, rest, via)
     if (typeof end !== 'number') return end
@@ -130,6 +137,35 @@ export function shellScriptWord(argv: WordValue[]): WordValue | undefined {
   return i === -1 ? undefined : argv[i + 1]
 }
 
+/** Paths (and -) that mean "read stdin" to bash, zsh and source. */
+export const stdinFiles: ReadonlySet<string> = new Set(['/dev/stdin', '/dev/fd/0', '-'])
+const shellValueLong = new Set(['--rcfile', '--init-file'])
+
+/**
+ * Whether a shell with no -c script reads its script from stdin: no script operand, -s, or - and /dev/stdin.
+ * 'unknown' when a run-time word could be a flag or the operand.
+ */
+export function shellStdin(argv: WordValue[]): boolean | 'unknown' {
+  for (let i = 1; i < argv.length; i++) {
+    const w = argv[i]!
+    if (w.kind !== 'literal') return 'unknown'
+    const t = w.text
+    if (t === '--') {
+      const next = argv[i + 1]
+      return next === undefined || (next.kind === 'literal' && stdinFiles.has(next.text))
+    }
+    if (stdinFiles.has(t)) return true
+    if (!/^[-+]./.test(t)) return false
+    if (t.startsWith('--')) {
+      if (shellValueLong.has(t)) i++
+      continue
+    }
+    if (t.includes('s')) return true
+    if (/[oO]/.test(t)) i++
+  }
+  return true
+}
+
 /** Commands run by `find ... -exec CMD ... ;` (or `+`), one argv per -exec. */
 export function findExecs(argv: WordValue[]): WordValue[][] {
   const out: WordValue[][] = []
@@ -138,7 +174,7 @@ export function findExecs(argv: WordValue[]): WordValue[][] {
     if (w?.kind !== 'literal' || !findExecFlags.has(w.text)) continue
     const rest = argv.slice(i + 1)
     const end = rest.findIndex((x) => x.kind === 'literal' && (x.text === ';' || x.text === '+'))
-    out.push(end === -1 ? rest : rest.slice(0, end))
+    out.push((end === -1 ? rest : rest.slice(0, end)).map((x) => withHole(x, '{}', '<found path>')))
     i += end === -1 ? rest.length : end + 1
   }
   return out

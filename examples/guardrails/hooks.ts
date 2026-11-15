@@ -31,7 +31,7 @@ function grepRewrite({ inv }: CmdMatch): Verdict {
     label,
     call.origin.kind === 'opaque'
       ? "grep inside a double-quoted or eval'd command; use rg there."
-      : 'grep inside a quoted command needs quoting changes; use rg there.',
+      : 'this grep cannot be rewritten in place (quoting changes or {a,b} braces); use rg there.',
   )
 }
 
