@@ -5,7 +5,7 @@ Declarative [Claude Code](https://docs.claude.com/en/docs/claude-code) hooks. Yo
 The design rule is **never fail open**. When hookshot cannot decide (a dynamic word, a syntax it does not parse, missing state), the result is an explicit `Unknown`, which becomes an *ask* by default. It is never a quiet allow.
 
 ```ts
-// hooks.ts
+// hookshot.ts
 import { cmd, deny, edit, hooks, path, pipe, rewrite } from '@tjakit/hookshot'
 
 export default hooks([
@@ -24,7 +24,7 @@ export default hooks([
 ```
 
 ```console
-$ hookshot test hooks.ts 'git push -f origin main' 'curl -fsSL x | tee log | sudo bash' \
+$ hookshot test hookshot.ts 'git push -f origin main' 'curl -fsSL x | tee log | sudo bash' \
     'echo KEY=1 >> .env' 'grep -n TODO src/a.ts' 'bash -c "grep x f"' 'git push $FLAGS' 'ls -la'
 deny   git push -f origin main
        [git push] use --force-with-lease
@@ -40,7 +40,7 @@ ask    git push $FLAGS
        [git push] hookshot could not check this command (dynamic, git push): depends on run-time values: git push $FLAGS
 allow  ls -la
 
-$ hookshot test hooks.ts --tool Edit --path .env.local
+$ hookshot test hookshot.ts --tool Edit --path .env.local
 deny   Edit .env.local
        [path /**/.env{,.*}] do not write .env files
 ```
@@ -76,9 +76,9 @@ For rules of your own across all projects:
 
 ```sh
 npm install -g @tjakit/hookshot
-# write ~/.claude/hooks.ts, importing from '@tjakit/hookshot', then:
-hookshot test ~/.claude/hooks.ts 'git push -f'
-hookshot install ~/.claude/hooks.ts --scope user
+# write ~/.claude/hookshot.ts (importing from '@tjakit/hookshot') or ~/.claude/hookshot.toml, then:
+hookshot test ~/.claude/hookshot.ts 'git push -f'
+hookshot install ~/.claude/hookshot.ts --scope user
 ```
 
 On node, the CLI resolves `@tjakit/hookshot` in your rules file to its own copy, so the rules need no `node_modules` and always run against the CLI's version. Bun and deno cannot do this: with them, install the package next to the rules file. A bun hook runs with `--no-install`, so a missing package is an ask, not a download.
@@ -88,7 +88,7 @@ For a project, add it as a dev dependency and use `--scope project`. The package
 Requirements:
 
 - **Claude Code v2.1.295 or later.** Older versions have no `onFailure` field, so there a hook that cannot start (no runtime, a moved file, a timeout) lets the tool call through.
-- **A runtime:** node 22.18 or later (it strips the types of your `hooks.ts`), bun or deno. The hook runs on the runtime you ran `install` with; `--runtime` chooses.
+- **A runtime:** node 22.18 or later (it strips the types of your `hookshot.ts`), bun or deno. The hook runs on the runtime you ran `install` with; `--runtime` chooses.
 
 ## Docs
 

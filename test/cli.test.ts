@@ -185,6 +185,22 @@ describe('hookshot install / uninstall', () => {
     expect(t.out()).toContain('already installed')
   })
 
+  test('a rules file named hookshot.ts is not mistaken for the CLI, and sits beside a hookshot.toml', async () => {
+    const cwd = tmp()
+    writeFileSync(join(cwd, 'hookshot.ts'), 'export default {}\n')
+    writeFileSync(join(cwd, 'hookshot.toml'), 'version = 1\n')
+    const t = io({ cwd })
+    const file = join(t.io.home, '.claude', 'settings.json')
+    expect(await main(['install', 'hookshot.ts', '--runtime', 'node'], t.io)).toBe(0)
+    expect(await main(['install', 'hookshot.toml', '--runtime', 'node'], t.io)).toBe(0)
+    expect(await main(['install', 'hookshot.ts'], t.io)).toBe(0)
+    expect(t.out()).toContain('already installed')
+    const rulesOf = () => (settings(file).hooks?.PreToolUse as { hooks: { args: string[] }[] }[]).map((g) => g.hooks[0]!.args.at(-1))
+    expect(rulesOf()).toEqual([join(cwd, 'hookshot.ts'), join(cwd, 'hookshot.toml')])
+    expect(await main(['uninstall', 'hookshot.ts'], t.io)).toBe(0)
+    expect(rulesOf()).toEqual([join(cwd, 'hookshot.toml')])
+  })
+
   test('--dry-run writes nothing; broken settings are left alone', async () => {
     const cwd = project()
     const t = io({ cwd })
