@@ -99,14 +99,14 @@
             ]
           },
           "refuse": {
-            "description": "What a refusal answers, with `message` and the reason: deny (default) or ask.",
+            "description": "What a refusal answers, with `message` and the reason: deny (default) or ask. A command that cannot be edited in place (quoting changes, {a,b} braces) is refused too.",
             "enum": [
               "deny",
               "ask"
             ]
           },
           "message": {
-            "description": "The reason given when the command cannot be rewritten, e.g. \"use rg (rg PATTERN [path])\".",
+            "description": "The reason given when the command cannot be rewritten (an unmapped flag, quoting changes, {a,b} braces), e.g. \"use rg (rg PATTERN [path])\".",
             "type": "string",
             "minLength": 1
           },

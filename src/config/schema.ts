@@ -143,8 +143,17 @@ const rewrite = {
       add: list('Flags put first in the new command, e.g. ["-F"] for fgrep -> rg.'),
       unlisted: { description: 'A flag not in the table: refuse (default) or keep it as written.', enum: ['refuse', 'keep'] },
       after_args: { description: 'A flag after the first argument (not mapped): refuse (default) or keep.', enum: ['refuse', 'keep'] },
-      refuse: { description: 'What a refusal answers, with `message` and the reason: deny (default) or ask.', enum: ['deny', 'ask'] },
-      message: { description: 'The reason given when the command cannot be rewritten, e.g. "use rg (rg PATTERN [path])".', type: 'string', minLength: 1 },
+      refuse: {
+        description:
+          'What a refusal answers, with `message` and the reason: deny (default) or ask. A command that cannot be edited in place (quoting changes, {a,b} braces) is refused too.',
+        enum: ['deny', 'ask'],
+      },
+      message: {
+        description:
+          'The reason given when the command cannot be rewritten (an unmapped flag, quoting changes, {a,b} braces), e.g. "use rg (rg PATTERN [path])".',
+        type: 'string',
+        minLength: 1,
+      },
       note: { description: 'A note shown to Claude with each rewrite.', type: 'string', minLength: 1 },
       via: commandKeys.via,
       standalone: commandKeys.standalone,
