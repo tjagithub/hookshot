@@ -94,7 +94,7 @@ describe('hookshot install / uninstall', () => {
     writeFileSync(file, JSON.stringify({ model: 'x' }))
     expect(await main(['install', 'rules.ts', '--runtime', 'node'], t.io)).toBe(0)
     expect(settings(file).hooks?.PreToolUse).toEqual([
-      { matcher, hooks: [{ type: 'command', command: 'node', args: [join(repo, 'bin/hookshot.ts'), 'run', join(cwd, 'rules.ts')] }] },
+      { matcher, hooks: [{ type: 'command', command: 'node', args: [join(repo, 'bin/hookshot.ts'), 'run', join(cwd, 'rules.ts')], onFailure: 'block' }] },
     ])
     expect(settings(`${file}.bak`)).toEqual({ model: 'x' })
     expect(await main(['install', 'rules.ts'], t.io)).toBe(0)

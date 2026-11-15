@@ -13,6 +13,7 @@ interface CommandHook {
   type: 'command'
   command: string
   args?: string[]
+  onFailure?: 'continue' | 'block'
 }
 interface MatcherGroup {
   matcher?: string
@@ -81,7 +82,9 @@ export function install(args: string[], io: Io): number {
     io.out(`already installed in ${file}\n`)
     return 0
   }
-  const entry: MatcherGroup = { matcher, hooks: [{ type: 'command', command: runtime, args: [portable(binPath(), scope, io), 'run', rules] }] }
+  // `run` always exits 0; onFailure covers what it can't: a missing runtime, a moved file, a timeout.
+  const hook: CommandHook = { type: 'command', command: runtime, args: [portable(binPath(), scope, io), 'run', rules], onFailure: 'block' }
+  const entry: MatcherGroup = { matcher, hooks: [hook] }
   groups.push(entry)
   io.out(`${values['dry-run'] ? 'would add' : 'adding'} to ${file} hooks.PreToolUse:\n${JSON.stringify(entry, null, 2)}\n`)
   if (!values['dry-run']) write(file, s, io)

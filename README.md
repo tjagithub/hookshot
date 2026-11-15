@@ -64,7 +64,10 @@ bun bin/hookshot.ts install path/to/hooks.ts --scope project
 
 Until it is published, import from `src/index.ts` by path in your rules file (`import { … } from '/path/to/hookshot/src/index.ts'`).
 
-Runtimes: bun, node (with type stripping) and deno all work. The CLI runs on bun by default.
+Requirements:
+
+- **Claude Code v2.1.295 or later.** Older versions have no `onFailure` field, so there a hook that cannot start (no runtime, a moved file, a timeout) lets the tool call through.
+- **A runtime:** bun, node (with type stripping) or deno. The CLI runs on bun by default.
 
 ## Rules
 
@@ -145,7 +148,7 @@ hookshot fetch-parser [--tag vX.Y.Z]     download the native parser for this pla
 ```
 
 - `run` always exits 0. Claude Code lets a tool call through when a hook exits with any code other than 0 or 2. So when the rules file fails to load, or anything throws, `run` prints an ask.
-- `install` merges one `PreToolUse` entry (matcher `Bash|Write|Edit|MultiEdit|NotebookEdit|Read`) into the settings file for the scope, in exec form. It is idempotent, writes a `.bak` first, and refuses a settings file that is not valid JSON.
+- `install` merges one `PreToolUse` entry (matcher `Bash|Write|Edit|MultiEdit|NotebookEdit|Read`) into the settings file for the scope, in exec form, with `"onFailure": "block"`, so a hook that cannot start blocks the call. It is idempotent, writes a `.bak` first, and refuses a settings file that is not valid JSON.
 
 You can also use it from code: `hooks()` returns a `Hook` with `evaluate(command)` and `evaluateFile(target)`. `runPreToolUse(hook)` is a complete stdin-to-stdout hook entry point.
 
