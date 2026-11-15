@@ -1,6 +1,6 @@
 # hookshot
 
-Declarative [Claude Code](https://docs.claude.com/en/docs/claude-code) hooks. You write rules in TypeScript; hookshot parses each Bash command into a real shell syntax tree (mvdan/sh) and runs the rules on it, not on the raw string.
+Declarative [Claude Code](https://docs.claude.com/en/docs/claude-code) hooks. You write rules in TypeScript or TOML; hookshot parses each Bash command into a real shell syntax tree (mvdan/sh) and runs the rules on it, not on the raw string.
 
 The design rule is **never fail open**. When hookshot cannot decide (a dynamic word, a syntax it does not parse, missing state), the result is an explicit `Unknown`, which becomes an *ask* by default. It is never a quiet allow.
 
@@ -52,6 +52,24 @@ Things to note in this output:
 - The grep inside `bash -c` can't be rewritten in place, so the rule denies it.
 - `$FLAGS` could hold `--force`, so hookshot asks.
 
+The same kind of rules work without code, in a `hookshot.toml` (`hookshot init` writes one, and the `#:schema` line gives editor completion):
+
+```toml
+#:schema https://unpkg.com/@tjakit/hookshot/schema/hookshot.schema.json
+version = 1
+
+[[deny]]
+command = "git"
+subcommand = ["push"]
+aliases = { "-f" = "--force" }
+flags = ["--force"]
+message = "use --force-with-lease"
+
+[[ask]]
+pipe = { from = ["curl", "wget"], to = ["bash", "sh", "zsh"] }
+message = "this pipes a download into a shell"
+```
+
 ## Install
 
 For rules of your own across all projects:
@@ -72,143 +90,23 @@ Requirements:
 - **Claude Code v2.1.295 or later.** Older versions have no `onFailure` field, so there a hook that cannot start (no runtime, a moved file, a timeout) lets the tool call through.
 - **A runtime:** node 22.18 or later (it strips the types of your `hooks.ts`), bun or deno. The hook runs on the runtime you ran `install` with; `--runtime` chooses.
 
-## Rules
+## Docs
 
-Every rule has a matcher and a terminal action (`deny`, `ask`, `note` or `then`). A rule with no action throws when it matches, which gives a `rule-error` Unknown.
-
-| Rule | Matches |
-| --- | --- |
-| `cmd(names, ...subcommands)` | a simple command, after unwrapping. `names` is a string or an array. |
-| `pipe(from, to)` | a pipeline where a stage matching `from` feeds a later stage matching `to`. |
-| `redirect(target)` | a Bash redirect target (`>`, `>>`, `<`, `>|` …). |
-| `path(spec)` | a file target: the `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Read` tools, Bash redirects and `tee` arguments. |
-| `word(name, pred)` | any word of any command, by a predicate on its value. |
-
-`cmd` refiners:
-
-- `.flags(spec)` tells the flag parser about aliases and flags that take a value.
-- `.withFlag(...)` and `.withoutFlag(...)` test for flags.
-- `.arg(pred)` tests positional arguments.
-- `.via(...wrappers)` matches only through these wrappers; `.standalone()` matches only without a wrapper.
-- `.where(cond)` takes a free condition.
-
-Predicates return a `Tri` (`true`, `false` or `'unknown'`), and `and`, `or` and `not` combine them. An `'unknown'` match becomes an `Unknown`, not a miss.
-
-`path` and `redirect`:
-
-- `.writes()`, `.reads()` and `.any()` choose the direction.
-- `.onDynamic('ignore')` skips targets such as `> "$f"`. The default, `'unknown'`, asks.
-
-### Path patterns
-
-A `PathSpec` is a glob string, a `RegExp` or a predicate. Globs use hookshot's own compiler, so they match the same on every runtime:
-
-- `*` and `?` match within one segment, and `*` also matches dotfiles.
-- `**` spans segments, and `{a,b}` gives alternatives.
-- `/x` is absolute, and `~/x` is under `$HOME`.
-- Any other pattern is relative to the project root (`CLAUDE_PROJECT_DIR`, else the cwd).
-
-Paths are normalised (`.`, `..`, `~`, `$HOME`); symlinks are not resolved. After a `cd`, `pushd` or `popd` the cwd is not known any more. From then on, a relative target is only decided if every possible location gives the same answer. If not, the result is an `Unknown`.
-
-### Actions
-
-```ts
-rule.deny(msg)    // msg is a string or (match) => string
-rule.ask(msg)
-rule.note(msg)    // shown to Claude, does not block
-rule.then((match, ctx) => verdict)   // return deny/ask/note/rewrite/pass/unknown
-rule.named('my-rule')                // the name in [brackets] in reasons
-```
-
-`rewrite([edit(call, start, end, text)])` replaces byte ranges of the command. `edit` returns `null` when the range can't be changed safely (for example inside `bash -c '…'`). Rewrites from different rules that overlap give an `edit-conflict` Unknown. A rewrite on a file tool is not allowed, and gives an Unknown.
-
-When several rules fire, the strongest wins: **deny > unknown > ask > rewrite > note**. Unknowns go through the policy:
-
-```ts
-hooks(rules, { onUnknown: 'ask' })   // default; also 'deny' or 'allow'
-```
-
-### Escalation
-
-```ts
-cmd('rm').withFlag('-r').ask('recursive delete').escalate({ after: 3, within: '10m', to: 'deny' })
-```
-
-This rule asks the first 3 times it fires in a session, then denies. A hook cannot see whether the user approved an ask, so hookshot counts *firings*, not approvals.
-
-State is one append-only JSONL file per session, in `$CLAUDE_PLUGIN_DATA/hookshot/` or `~/.local/state/hookshot/`. Files older than 7 days are pruned. History loads only when a rule uses `escalate`. If there is no session id, or the store can't be read or written, the result is a `state-unavailable` Unknown. Pass `hooks(rules, { store })` to use another store. With `store: null`, escalating rules give that Unknown.
-
-## Config files
-
-Rules can also live in a `hookshot.toml`, with no TypeScript. `hookshot init` writes a starter file:
-
-```toml
-#:schema https://unpkg.com/@tjakit/hookshot/schema/hookshot.schema.json
-version = 1
-on_unknown = "ask"   # ask, deny or allow
-
-[[rewrite]]                      # grep -> rg by a flag table; a flag it cannot map is refused
-command = ["grep", "egrep"]
-to = "rg"
-message = "use rg (e.g. rg PATTERN [path])"
-[rewrite.flags]
-"-r" = ""                        # drop
-"--ignore-case" = "-i"           # rename
-"-e" = false                     # no equivalent: refuse
-"-A" = { to = "-A", value = "number", form = "attached" }
-"--exclude" = { to = "-g", value = "any", quote = "always", prefix = "!" }
-
-[[deny]]
-command = "rm"
-aliases = { "-r" = "--recursive", "-R" = "--recursive" }
-flags = ["--recursive"]
-args = ["/", "~", "$HOME"]
-message = "refusing recursive rm on '{arg}'"
-
-[[ask]]
-pipe = { from = ["curl", "wget"], to = ["sh", "bash"] }
-message = "this pipes a download into a shell"
-
-[[deny]]
-path = "/**/.env{,.*}"
-except = ["/**/*.example"]
-message = "refusing to write {path}"
-```
-
-- `deny`, `ask` and `note` each take a `message` and exactly one matcher: `command` (with `subcommand`, `flags`, `without_flags`, `aliases`, `value_flags`, `args`, `via`, `standalone`), `pipe`, `path` (with `op`, `except`, `on_dynamic`) or `word` (`prefix`, `unquoted`). `name` and `escalate` work as in TypeScript.
-- A `rewrite` maps the leading flags of a command by its table: `""` drops a flag, a string renames it, `false` has no equivalent, and a table maps a flag with a value. `unlisted` and `after_args` choose refuse (default) or keep. A refusal denies (or asks, with `refuse = "ask"`) with the message and the reason. `like = "<name>"` starts from the table of an earlier rewrite.
-- The `#:schema` line gives completion, hovers and errors in editors that use [Taplo](https://taplo.tamasfe.dev) (Even Better TOML) or [Tombi](https://tombi-toml.github.io/tombi/).
-- `run`, `test` and `install` take a `.toml` in place of a rules file. `hookshot check hookshot.toml` validates it and lists its rules. A config that fails to parse or validate is an error naming the key path (`deny[2].flags[0]: expected string`), and `run` turns that into an ask.
-- What TOML cannot say, such as a rewrite that moves arguments, stays in TypeScript. Mix the two with `hooks([...configRules('./hookshot.toml'), myRule])`. [examples/guardrails-toml](examples/guardrails-toml) is the guardrails example written this way.
+- [Rules](docs/rules.md): the TypeScript API, path patterns, actions, precedence and escalation.
+- [Config files](docs/config.md): the `hookshot.toml` format, flag-mapping rewrites, `check` and `init`.
+- [CLI](docs/cli.md): every command and flag, and how `run` and `install` behave.
+- [Parser backends](docs/parser.md): the native addon, the WASM fallback and `fetch-parser`.
+- [Contributing](CONTRIBUTING.md): building, testing and the design rules.
 
 ## CLI
 
 ```text
-hookshot run <rules>                     read a PreToolUse event on stdin, print the decision
-hookshot test <rules> [command...]       check commands (or stdin lines) against the rules
-    --tool Write --path p                check a file tool instead (--path repeats)
-    --cwd dir   --json   --expect allow|ask|deny   (exit 1 on a mismatch, for CI)
-hookshot check <hookshot.toml>           validate a config and list its rules (exit 1 on errors)
-hookshot init [hookshot.toml]            write a starter config (never overwrites)
-hookshot install <rules> [--scope user|project|local] [--runtime bun|node] [--dry-run]
-hookshot uninstall <rules> [--scope ...] [--dry-run]
-hookshot fetch-parser [--tag vX.Y.Z]     download the native parser for this platform
+hookshot test <rules> [command...]       check commands against the rules (.ts, .js or .toml)
+hookshot check <hookshot.toml>           validate a config and list its rules
+hookshot init [hookshot.toml]            write a starter config
+hookshot install <rules> [--scope user|project|local]
+hookshot run <rules>                     the hook itself: PreToolUse JSON in, decision out
 ```
-
-- `<rules>` is a `.ts`/`.js` file that `export default`s `hooks([...])`, or a `hookshot.toml`.
-- `run` always exits 0. Claude Code lets a tool call through when a hook exits with any code other than 0 or 2. So when the rules file fails to load, or anything throws, `run` prints an ask.
-- `install` merges one `PreToolUse` entry (matcher `Bash|Write|Edit|MultiEdit|NotebookEdit|Read`) into the settings file for the scope, in exec form, with `"onFailure": "block"`, so a hook that cannot start blocks the call. It is idempotent, writes a `.bak` first, and refuses a settings file that is not valid JSON.
-
-You can also use it from code: `hooks()` returns a `Hook` with `evaluate(command)` and `evaluateFile(target)`. `runPreToolUse(hook)` is a complete stdin-to-stdout hook entry point.
-
-## Parser backends
-
-The parser is mvdan/sh v3.14.1, compiled from Go in two forms:
-
-- **Native Node-API addon** `native/build/hsparse-<platform>-<arch>.node`. This is the fast one (cold start about 12 ms). The npm package includes it. In a git clone, `hookshot fetch-parser` gets it from the GitHub release that matches the package version and checks its SHA-256. It is built for darwin-arm64, darwin-x64, linux-arm64 and linux-x64.
-- **WASM fallback** `native/build/hsparse.wasm`, tracked in git, so a fresh clone parses straight away (on Windows too).
-
-`parserStatus()` says which backend loaded, and why the others did not. To build them yourself, see [Development](#development).
 
 ## Limits
 
@@ -220,14 +118,3 @@ These are not claimed, so don't rely on them:
 - Symlinks are not resolved.
 - A hook is a guardrail for an assistant, not a sandbox. A determined process can write files in ways no command parser can see.
 
-## Development
-
-```sh
-pnpm install
-native/build.sh          # needs Go and node-api-headers; HS_ARCH=x64 cross-builds on Apple silicon
-pnpm typecheck
-pnpm test                # FC_RUNS=400 for deeper property runs
-pnpm coverage            # keep src/ lines at 90% or more
-```
-
-The repo's [CLAUDE.md](CLAUDE.md) has the design rules, the gotchas and the release steps. `examples/guardrails/` is a complete port of a real bash guard, with its case tables in `test/`.

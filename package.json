@@ -57,5 +57,6 @@
   },
   "dependencies": {
     "smol-toml": "^1.9.1"
-  }
+  },
+  "homepage": "https://github.com/tjagithub/hookshot#readme"
 }
