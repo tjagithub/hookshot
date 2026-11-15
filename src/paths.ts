@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 import type { Context } from './context.ts'
 import type { Call, Extraction } from './extract.ts'
 import { parseFlags } from './flags.ts'
-import type { WordValue } from './word.ts'
+import { type WordValue, display } from './word.ts'
 
 export type FileOp = 'write' | 'read'
 
@@ -44,8 +44,9 @@ export function resolvePath(raw: string, ctx: Context, { cwdKnown = true, tilde 
 }
 const known = (abs: string, shown: string): PathValue => ({ kind: 'known', abs: posix.normalize(abs), shown })
 
-/** A word as a path. `$HOME` at the start is expanded (the hook runs as the same user); other holes are dynamic. */
+/** A word as a path. `$HOME` at the start is expanded (the hook runs as the same user); other holes and globs are dynamic. */
 export function wordPath(w: WordValue, ctx: Context, cwdKnown = true): PathValue {
+  if (w.glob) return { kind: 'dynamic', shown: display(w) }
   if (w.kind === 'literal') return resolvePath(w.text, ctx, { cwdKnown, tilde: w.startsUnquoted })
   const [first, ...rest] = w.segments
   if (typeof first === 'object' && first.dynamic === '$HOME' && rest.every((s) => typeof s === 'string')) {

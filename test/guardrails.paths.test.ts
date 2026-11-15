@@ -15,6 +15,12 @@ describe('guardrails: .env writes', () => {
     [{ tool_name: 'Write', tool_input: { file_path: '/p/.envrc' } }, undefined],
     [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 >> .env' } }, 'deny'],
     [{ tool_name: 'Bash', tool_input: { command: 'cp .env.example .env' } }, undefined],
+    // bash expands a glob target to an existing file, so .en? may be .env: not known, so ask.
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .en?' } }, 'ask'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 | tee .en[v]' } }, 'ask'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .@(env)' } }, 'ask'],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > ".en?"' } }, undefined],
+    [{ tool_name: 'Bash', tool_input: { command: 'echo K=1 > .en\\?' } }, undefined],
   ])('%j -> %s', async (input, want) => {
     expect(await decide(input)).toBe(want)
   })

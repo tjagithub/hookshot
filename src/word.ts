@@ -14,6 +14,8 @@ interface Base {
   quoting: Quoting
   /** First part is unquoted text, e.g. `--force` but not `"--force"`. */
   startsUnquoted: boolean
+  /** Unquoted * ? [ or an extglob opener (@( !( +(): the shell may expand it to file names. */
+  glob: boolean
   start: number
   end: number
 }
@@ -64,6 +66,13 @@ function segmentsOf(parts: WordPart[], inDouble: boolean): Segment[] {
   return out
 }
 
+// Glob characters in unquoted raw text, skipping backslash-escaped ones (\\*). Adjacent Lits are one run:
+// mvdan splits .@(env) into '.@' and '(env)'.
+function hasGlob(parts: WordPart[]): boolean {
+  const runs = parts.map((p) => (p.Type === 'Lit' ? (p.Value ?? '') : '\0')).join('').split('\0')
+  return runs.some((r) => /(?:^|[^\\])(?:\\\\)*(?:[*?[]|[@!+]\()/.test(r))
+}
+
 function quotingOf(parts: WordPart[]): Quoting {
   if (parts.every((p) => p.Type === 'Lit')) return 'none'
   if (parts.length === 1 && parts[0]?.Type === 'SglQuoted') return 'single'
@@ -78,6 +87,7 @@ export function wordValue(word: Word): WordValue {
     word,
     quoting: quotingOf(parts),
     startsUnquoted: parts[0]?.Type === 'Lit',
+    glob: hasGlob(parts),
     start: word.Pos.Offset,
     end: word.End.Offset,
   }

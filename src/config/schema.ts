@@ -63,7 +63,7 @@ const pathKeys = {
   },
   op: { description: 'Which access matches. Default: write.', enum: ['write', 'read', 'any'] },
   except: list('Globs this rule leaves alone, e.g. ["**/*.example"].'),
-  on_dynamic: { description: 'A path only known at run time ("$out"): ask (default, through on_unknown) or ignore.', enum: ['ask', 'ignore'] },
+  on_dynamic: { description: 'A path only known at run time ("$out", or a glob such as out*.log): ask (default, through on_unknown) or ignore.', enum: ['ask', 'ignore'] },
 }
 
 const wordKey = {

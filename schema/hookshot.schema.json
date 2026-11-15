@@ -371,7 +371,7 @@
             "minItems": 1
           },
           "on_dynamic": {
-            "description": "A path only known at run time (\"$out\"): ask (default, through on_unknown) or ignore.",
+            "description": "A path only known at run time (\"$out\", or a glob such as out*.log): ask (default, through on_unknown) or ignore.",
             "enum": [
               "ask",
               "ignore"
@@ -663,7 +663,7 @@
             "minItems": 1
           },
           "on_dynamic": {
-            "description": "A path only known at run time (\"$out\"): ask (default, through on_unknown) or ignore.",
+            "description": "A path only known at run time (\"$out\", or a glob such as out*.log): ask (default, through on_unknown) or ignore.",
             "enum": [
               "ask",
               "ignore"
@@ -955,7 +955,7 @@
             "minItems": 1
           },
           "on_dynamic": {
-            "description": "A path only known at run time (\"$out\"): ask (default, through on_unknown) or ignore.",
+            "description": "A path only known at run time (\"$out\", or a glob such as out*.log): ask (default, through on_unknown) or ignore.",
             "enum": [
               "ask",
               "ignore"

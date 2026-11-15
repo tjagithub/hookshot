@@ -43,6 +43,14 @@ describe('wordValue', () => {
     expect(w).toMatchObject({ kind: 'dynamic', hint: `<${Type}>` })
   })
 
+  test.each([
+    ['*.ts', true], ['a?', true], ['[ab]', true], ['.@(env)', true], ['!(x)', true], ['+(a)', true], ['"a"*', true], ['a\\\\*', true],
+    ['"*.ts"', false], ["'a?'", false], ['a\\*', false], ['\\@\\(b\\)', false], ['a@b', false], ['x!', false], ['"$x"', false],
+  ])('%s glob: %s', async (src, glob) => {
+    const [, w] = await words(`x ${src}`)
+    expect(w?.glob).toBe(glob)
+  })
+
   test('couldEqual treats holes as any text', async () => {
     const [, a, b, c] = await words('x "$X" "$X/*" "$tmp/build"')
     expect(couldEqual(a!, ['/'])).toBe(true)
