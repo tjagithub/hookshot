@@ -126,7 +126,7 @@ jobs:
           node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(cd /tmp && npm --version)" \
             || { echo "::error::trusted publishing needs npm 11.5.1 or later"; exit 1; }
       - run: pnpm pack --pack-destination "$RUNNER_TEMP/pkg"
-      # npm, not pnpm, for OIDC; run outside the repo, where npm rejects the pnpm devEngines.
+      # npm, not pnpm, for OIDC; it publishes the exact tarball pnpm packed (and test/pack.test.ts checks).
       - name: publish
         working-directory: ${{ runner.temp }}/pkg
         run: npm publish ./*.tgz --access public --provenance

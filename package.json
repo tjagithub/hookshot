@@ -38,13 +38,6 @@
     "typecheck": "tsc --noEmit",
     "bench": "node bench/parse.bench.ts"
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "12.21.0",
-      "onFail": "download"
-    }
-  },
   "packageManager": "pnpm@12.21.0",
   "devDependencies": {
     "@fast-check/vitest": "^0.5.0",
