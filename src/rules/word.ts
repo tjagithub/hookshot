@@ -1,5 +1,6 @@
 import type { Call, Extraction } from '../extract.ts'
 import type { Tri } from '../flags.ts'
+import type { Context } from '../context.ts'
 import { type Verdict, combine, pass, unknown } from '../verdict.ts'
 import type { WordValue } from '../word.ts'
 import { type Rule, Terminal } from './rule.ts'
@@ -20,12 +21,12 @@ export class WordRule extends Terminal<WordMatch> implements Rule {
     this.pred = pred
   }
 
-  check(x: Extraction): Verdict {
+  protected override bash(x: Extraction, ctx: Context): Verdict {
     const out: Verdict[] = []
     for (const call of x.calls) {
       for (const w of call.words) {
         const t = this.pred(w, call)
-        if (t === true) out.push(this.act({ word: w, call }, x))
+        if (t === true) out.push(this.act({ word: w, call }, ctx))
         else if (t === 'unknown') out.push(unknown({ why: 'dynamic', rule: this.name, detail: `word ${w.kind === 'dynamic' ? w.hint : w.text}` }))
       }
     }

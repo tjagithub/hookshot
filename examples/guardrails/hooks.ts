@@ -2,7 +2,7 @@
 import { accessSync, constants } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import process from 'node:process'
-import { type CmdMatch, type Verdict, type WordValue, cmd, couldEqual, deny, display, edit, hooks, pass, pipe, rewrite, word } from '../../src/index.ts'
+import { type CmdMatch, type Verdict, type WordValue, cmd, couldEqual, deny, display, edit, hooks, pass, path, pipe, rewrite, word } from '../../src/index.ts'
 import { grepToRg } from '../../src/translate/grep-rg.ts'
 
 const label = 'guardrails'
@@ -80,7 +80,13 @@ export const guardrails = hooks([
     }),
   // Not in bash-guard: download piped into a shell, at any distance (curl | tee | sudo bash).
   pipe(['curl', 'wget'], ['bash', 'sh', 'zsh', 'dash', 'ksh']).named(label).ask('this pipes a download into a shell.'),
+  // Not in bash-guard: writing a .env file, by any tool or redirect; templates are fine.
+  path('/**/.env{,.*}')
+    .named(label)
+    .then(({ path: p }) => (/\.(example|sample|template)$/.test(p) ? pass() : deny(label, `refusing to write ${p}; ask the user to edit secrets.`))),
   word(label, (w) => w.startsUnquoted && display(w).startsWith('--force')).deny(
     '--force* flags are not allowed. Find the non-forced way, or ask the user to run it themselves.',
   ),
 ])
+
+export default guardrails

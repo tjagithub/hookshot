@@ -1,5 +1,6 @@
 import type { Extraction, Invocation } from '../extract.ts'
 import { type FlagSpec, type ParsedFlags, type Tri, and, hasFlag, not, or, parseFlags } from '../flags.ts'
+import type { Context } from '../context.ts'
 import { type Verdict, combine, pass } from '../verdict.ts'
 import type { WordValue } from '../word.ts'
 import { type Matcher, type Rule, Terminal, undecided } from './rule.ts'
@@ -72,11 +73,11 @@ export class CmdRule extends Terminal<CmdMatch> implements Rule, Matcher {
     return this.matchOf(inv).tri
   }
 
-  check(x: Extraction): Verdict {
+  protected override bash(x: Extraction, ctx: Context): Verdict {
     const out: Verdict[] = []
     for (const inv of x.invocations) {
       const { tri, m } = this.matchOf(inv)
-      if (tri === true) out.push(this.act(m, x))
+      if (tri === true) out.push(this.act(m, ctx))
       else if (tri === 'unknown') out.push(undecided(this.name, inv))
     }
     return out.length ? combine(...out) : pass()

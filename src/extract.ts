@@ -9,7 +9,7 @@ export type Origin = { kind: 'top' } | { kind: 'single-quoted'; base: number } |
 
 export type UnknownWhy =
   | 'unparsed' | 'budget' | 'unsupported-syntax' | 'dynamic' | 'opaque-wrapper' | 'opaque-shell'
-  | 'parser-unavailable' | 'rule-error' | 'edit-conflict'
+  | 'parser-unavailable' | 'rule-error' | 'edit-conflict' | 'state-unavailable'
 export interface Unknown {
   why: UnknownWhy
   detail: string

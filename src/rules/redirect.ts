@@ -1,4 +1,5 @@
 import type { Extraction, RedirectInfo, RedirectKind } from '../extract.ts'
+import type { Context } from '../context.ts'
 import { type Verdict, combine, pass, unknown } from '../verdict.ts'
 import type { Rule } from './rule.ts'
 import { Terminal } from './rule.ts'
@@ -40,7 +41,7 @@ export class RedirectRule extends Terminal<RedirectInfo> implements Rule {
     return this
   }
 
-  check(x: Extraction): Verdict {
+  protected override bash(x: Extraction, ctx: Context): Verdict {
     const out: Verdict[] = []
     for (const r of x.redirects) {
       if (r.kind === 'unknown') {
@@ -49,7 +50,7 @@ export class RedirectRule extends Terminal<RedirectInfo> implements Rule {
       }
       if (!this.kinds.has(r.kind) || !r.target) continue
       if (r.target.kind === 'literal') {
-        if (test(this.target, r.target.text)) out.push(this.act(r, x))
+        if (test(this.target, r.target.text)) out.push(this.act(r, ctx))
       } else if (this.dynamic === 'unknown') {
         out.push(unknown({ why: 'dynamic', rule: this.name, detail: `redirect target ${r.target.hint}` }))
       }

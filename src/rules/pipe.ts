@@ -1,5 +1,6 @@
 import type { Extraction, Invocation, Pipeline } from '../extract.ts'
 import { type Tri, and, or } from '../flags.ts'
+import type { Context } from '../context.ts'
 import { type Verdict, combine, pass, unknown } from '../verdict.ts'
 import { cmd } from './cmd.ts'
 import { type Matcher, type Rule, Terminal } from './rule.ts'
@@ -28,7 +29,7 @@ export class PipeRule extends Terminal<PipeMatch> implements Rule {
     this.name = `pipe ${label(from)} -> ${label(to)}`
   }
 
-  check(x: Extraction): Verdict {
+  protected override bash(x: Extraction, ctx: Context): Verdict {
     const out: Verdict[] = []
     for (const pipeline of x.pipelines) {
       let found: PipeMatch | undefined
@@ -44,7 +45,7 @@ export class PipeRule extends Terminal<PipeMatch> implements Rule {
           }
         }
       }
-      if (found) out.push(this.act(found, x))
+      if (found) out.push(this.act(found, ctx))
       else if (maybe === 'unknown') {
         out.push(unknown({ why: 'dynamic', rule: this.name, detail: 'a pipeline stage is only known at run time' }))
       }
