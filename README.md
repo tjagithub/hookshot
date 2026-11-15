@@ -95,6 +95,7 @@ Requirements:
 - [Rules](docs/rules.md): the TypeScript API, path patterns, actions, precedence and escalation.
 - [Config files](docs/config.md): the `hookshot.toml` format, flag-mapping rewrites, `check` and `init`.
 - [CLI](docs/cli.md): every command and flag, and how `run` and `install` behave.
+- [Shell expansions](docs/expansions.md): what rules see after quotes, braces, tildes, globs, wrappers and nested shells, and what they do not see.
 - [Parser backends](docs/parser.md): the native addon, the WASM fallback and `fetch-parser`.
 - [Contributing](CONTRIBUTING.md): building, testing and the design rules.
 
@@ -113,6 +114,7 @@ hookshot run <rules>                     the hook itself: PreToolUse JSON in, de
 These are not claimed, so don't rely on them:
 
 - Only redirects and `tee` count as Bash file writes. `cp`, `mv`, `sed -i`, `dd`, interpreters and the like are not seen by `path()`. Use `cmd()` rules for them.
+- Program files (`bash setup.sh`), other languages (`python3 -c`) and aliases from the user's rc files are not read. See [expansions.md](docs/expansions.md#not-seen).
 - The `Grep` and `Glob` tools (directory reads) and MCP tools are not checked.
 - Escalation counts firings, not user approvals.
 - Symlinks are not resolved.

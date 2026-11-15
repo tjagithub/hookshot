@@ -36,7 +36,7 @@ A `PathSpec` is a glob string, a `RegExp` or a predicate. Globs use hookshot's o
 - `/x` is absolute, and `~/x` is under `$HOME`.
 - Any other pattern is relative to the project root (`CLAUDE_PROJECT_DIR`, else the cwd).
 
-Paths are normalised (`.`, `..`, `~`, `$HOME`); symlinks are not resolved. A Bash target with an unquoted glob (`*`, `?`, `[`, or an extglob such as `@(…)`) is only known at run time, because bash expands it to an existing file: `> .en?` writes `.env` when that exists. So it is dynamic, like `$f`. After a `cd`, `pushd` or `popd` the cwd is not known any more. From then on, a relative target is only decided if every possible location gives the same answer. If not, the result is an `Unknown`.
+Paths are normalised (`.`, `..`, `~`, `$HOME`); symlinks are not resolved. A Bash target with an unquoted glob (`*`, `?`, `[`, `@(…)`, zsh `(a|b)`) is only known at run time, because bash expands it to an existing file: `> .en?` writes `.env` when that exists. So it is dynamic, like `$f`. Braces give one target per alternative (`tee {.env,x}`). [expansions.md](expansions.md) lists every expansion. After a `cd`, `pushd` or `popd` the cwd is not known any more. From then on, a relative target is only decided if every possible location gives the same answer. If not, the result is an `Unknown`.
 
 ## Actions
 
