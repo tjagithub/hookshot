@@ -66,6 +66,48 @@ export type Unwrapped =
 
 const isAssignment = (t: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)
 
+// How many words one wrapper word uses (1, or 2 with its value), or a final answer; undefined ends the flags.
+type Step = number | Unwrapped | undefined
+
+function longStep(spec: WrapperSpec, name: string, t: string, via: string[]): Step {
+  const flag = t.split('=')[0] ?? t
+  if (spec.noRun?.includes(flag)) return { kind: 'none', via }
+  if (spec.opaque?.includes(flag)) return { kind: 'unknown', why: 'opaque-wrapper', detail: `${name} ${flag}`, via }
+  return !t.includes('=') && spec.valueLongFlags?.includes(flag) ? 2 : 1
+}
+
+function shortStep(spec: WrapperSpec, name: string, t: string, via: string[]): Step {
+  const chars = [...t.slice(1)]
+  if (chars.some((c) => spec.noRun?.includes(`-${c}`))) return { kind: 'none', via }
+  const opaque = chars.find((c) => spec.opaque?.includes(`-${c}`))
+  if (opaque) return { kind: 'unknown', why: 'opaque-wrapper', detail: `${name} -${opaque}`, via }
+  const k = chars.findIndex((c) => spec.valueFlags.includes(c))
+  return k !== -1 && k === chars.length - 1 ? 2 : 1
+}
+
+function wordStep(spec: WrapperSpec, name: string, w: WordValue, via: string[]): Step {
+  if (w.kind !== 'literal') return undefined
+  const t = w.text
+  if (spec.assignments && isAssignment(t)) return 1
+  if (t.startsWith('--') && t.length > 2) return longStep(spec, name, t, via)
+  if (t.startsWith('-') && t.length > 1) return shortStep(spec, name, t, via)
+  return undefined
+}
+
+// The index of the first word after one wrapper's own flags (past `--`), or a final answer.
+function wrapperEnd(spec: WrapperSpec, name: string, argv: WordValue[], via: string[]): number | Unwrapped {
+  let i = 1
+  while (i < argv.length) {
+    const w = argv[i]!
+    if (w.kind === 'literal' && w.text === '--') return i + 1
+    const step = wordStep(spec, name, w, via)
+    if (step === undefined) break
+    if (typeof step !== 'number') return step
+    i += step
+  }
+  return i
+}
+
 /** Strip wrappers (sudo, env, timeout ...) from the front of argv, per the table above. */
 export function unwrap(argv: WordValue[], table: Readonly<Record<string, WrapperSpec>> = wrappers): Unwrapped {
   const via: string[] = []
@@ -75,38 +117,9 @@ export function unwrap(argv: WordValue[], table: Readonly<Record<string, Wrapper
     const spec = name !== undefined && rest[0]?.kind === 'literal' ? table[name] : undefined
     if (!spec || name === undefined) return rest.length ? { kind: 'run', argv: rest, via } : { kind: 'none', via }
     via.push(name)
-    let i = 1
-    while (i < rest.length) {
-      const w = rest[i]
-      if (!w || w.kind !== 'literal') break
-      const t = w.text
-      if (t === '--') {
-        i++
-        break
-      }
-      if (spec.assignments && isAssignment(t)) {
-        i++
-        continue
-      }
-      if (t.startsWith('--') && t.length > 2) {
-        const flag = t.split('=')[0] ?? t
-        if (spec.noRun?.includes(flag)) return { kind: 'none', via }
-        if (spec.opaque?.includes(flag)) return { kind: 'unknown', why: 'opaque-wrapper', detail: `${name} ${flag}`, via }
-        i += !t.includes('=') && spec.valueLongFlags?.includes(flag) ? 2 : 1
-        continue
-      }
-      if (t.startsWith('-') && t.length > 1) {
-        const chars = [...t.slice(1)]
-        if (chars.some((c) => spec.noRun?.includes(`-${c}`))) return { kind: 'none', via }
-        const opaque = chars.find((c) => spec.opaque?.includes(`-${c}`))
-        if (opaque) return { kind: 'unknown', why: 'opaque-wrapper', detail: `${name} -${opaque}`, via }
-        const k = chars.findIndex((c) => spec.valueFlags.includes(c))
-        i += k !== -1 && k === chars.length - 1 ? 2 : 1
-        continue
-      }
-      break
-    }
-    rest = rest.slice(i + (spec.positionals ?? 0))
+    const end = wrapperEnd(spec, name, rest, via)
+    if (typeof end !== 'number') return end
+    rest = rest.slice(end + (spec.positionals ?? 0))
     if (!rest.length) return { kind: 'none', via }
   }
 }
