@@ -82,37 +82,47 @@ const anywhere = { root: '/r', home: '/h' }
 const sections = ['deny', 'ask', 'note'] as const
 
 // What the schema cannot say: globs compile, durations parse, flag keys are one flag each.
-function semantic(cfg: Config): ConfigError[] {
-  const out: ConfigError[] = []
-  const tryIt = (at: string, f: () => unknown) => {
+// Collects errors for semantic(): each check names its key path.
+class Checks {
+  readonly out: ConfigError[] = []
+  try(at: string, f: () => unknown) {
     try {
       f()
     } catch (e) {
-      out.push({ path: at, message: e instanceof Error ? e.message : String(e) })
+      this.out.push({ path: at, message: e instanceof Error ? e.message : String(e) })
     }
   }
-  const oneFlag = (at: string, f: string) => {
-    if (!/^(-[^-]|--[^=]+)$/.test(f)) out.push({ path: at, message: `${JSON.stringify(f)} is not one flag (-x or --name)` })
+  oneFlag(at: string, f: string) {
+    if (!/^(-[^-]|--[^=]+)$/.test(f)) this.out.push({ path: at, message: `${JSON.stringify(f)} is not one flag (-x or --name)` })
   }
-  const esc = (at: string, e?: Escalate) => e?.within !== undefined && tryIt(`${at}.escalate.within`, () => duration(e.within!))
-  for (const s of sections) {
-    for (const [i, r] of (cfg[s] ?? []).entries()) {
-      const at = `${s}[${i}]`
-      esc(at, r.escalate)
-      if (r.path !== undefined) tryIt(`${at}.path`, () => compileGlob(r.path!, anywhere))
-      for (const [j, g] of (r.except ?? []).entries()) tryIt(`${at}.except[${j}]`, () => compileGlob(g, anywhere))
-      for (const [j, f] of (r.value_flags ?? []).entries()) oneFlag(`${at}.value_flags[${j}]`, f)
-      for (const k of Object.keys(r.aliases ?? {})) oneFlag(`${at}.aliases[${JSON.stringify(k)}]`, k)
-    }
+  escalate(at: string, e?: Escalate) {
+    if (e?.within !== undefined) this.try(`${at}.escalate.within`, () => duration(e.within!))
   }
+}
+
+function checkAction(c: Checks, at: string, r: ActionItem) {
+  c.escalate(at, r.escalate)
+  if (r.path !== undefined) c.try(`${at}.path`, () => compileGlob(r.path!, anywhere))
+  for (const [j, g] of (r.except ?? []).entries()) c.try(`${at}.except[${j}]`, () => compileGlob(g, anywhere))
+  for (const [j, f] of (r.value_flags ?? []).entries()) c.oneFlag(`${at}.value_flags[${j}]`, f)
+  for (const k of Object.keys(r.aliases ?? {})) c.oneFlag(`${at}.aliases[${JSON.stringify(k)}]`, k)
+}
+
+function checkRewrite(c: Checks, at: string, r: RewriteItem, named: ReadonlySet<string>) {
+  c.escalate(at, r.escalate)
+  if (r.like !== undefined && !named.has(r.like)) c.out.push({ path: `${at}.like`, message: `no earlier rewrite named ${JSON.stringify(r.like)}` })
+  for (const k of Object.keys(r.flags ?? {})) c.oneFlag(`${at}.flags[${JSON.stringify(k)}]`, k)
+}
+
+function semantic(cfg: Config): ConfigError[] {
+  const c = new Checks()
+  for (const s of sections) for (const [i, r] of (cfg[s] ?? []).entries()) checkAction(c, `${s}[${i}]`, r)
   const named = new Set<string>()
   for (const [i, r] of (cfg.rewrite ?? []).entries()) {
-    esc(`rewrite[${i}]`, r.escalate)
-    if (r.like !== undefined && !named.has(r.like)) out.push({ path: `rewrite[${i}].like`, message: `no earlier rewrite named ${JSON.stringify(r.like)}` })
+    checkRewrite(c, `rewrite[${i}]`, r, named)
     if (r.name) named.add(r.name)
-    for (const k of Object.keys(r.flags ?? {})) oneFlag(`rewrite[${i}].flags[${JSON.stringify(k)}]`, k)
   }
-  return out
+  return c.out
 }
 
 /** Parse and validate TOML text; throws ConfigInvalid with every error found. */

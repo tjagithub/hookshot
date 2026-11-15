@@ -27,36 +27,37 @@ const join = (path: string, key: string | number) =>
   typeof key === 'number' ? `${path}[${key}]` : /^[A-Za-z_][\w-]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path}[${JSON.stringify(key)}]`
 const show = (v: unknown) => JSON.stringify(v)
 
-/** Every way value breaks schema, with paths. An empty list means it is valid. */
-export function validate(value: unknown, schema: Schema, root: Schema = schema, path = ''): ConfigError[] {
+function deref(schema: Schema, root: Schema): Schema {
   for (const k of Object.keys(schema)) if (!known.has(k)) throw new Error(`validate: unsupported schema keyword ${k}`)
-  if (typeof schema.$ref === 'string') {
-    const name = schema.$ref.replace(/^#\/\$defs\//, '')
-    const target = (root.$defs as Record<string, Schema> | undefined)?.[name]
-    if (!target) throw new Error(`validate: unknown $ref ${schema.$ref}`)
-    return validate(value, target, root, path)
-  }
-  const err = (message: string, at = path): ConfigError[] => [{ path: at, message }]
+  if (typeof schema.$ref !== 'string') return schema
+  const target = (root.$defs as Record<string, Schema> | undefined)?.[schema.$ref.replace(/^#\/\$defs\//, '')]
+  if (!target) throw new Error(`validate: unknown $ref ${schema.$ref}`)
+  return deref(target, root)
+}
+
+// The keywords on the value itself, before items and properties; the first one broken.
+function shape(value: unknown, schema: Schema): string | undefined {
   const got = typeOf(value)
+  if (typeof schema.type === 'string' && !fits(schema.type, got)) return `expected ${schema.type}, got ${got}`
+  if ('const' in schema && value !== schema.const) return `must be ${show(schema.const)}`
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return `must be one of ${schema.enum.map(show).join(', ')}`
+  const size = typeof value === 'string' ? schema.minLength : Array.isArray(value) ? schema.minItems : undefined
+  if (typeof size === 'number' && (value as string | unknown[]).length < size) return 'must not be empty'
+  if (typeof value === 'string' && typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value)) {
+    return `${show(value)} does not match ${schema.pattern}`
+  }
+  if (typeof value === 'number' && typeof schema.minimum === 'number' && value < schema.minimum) return `must be at least ${schema.minimum}`
+  return undefined
+}
 
+/** Every way value breaks schema, with paths. An empty list means it is valid. */
+export function validate(value: unknown, s: Schema, root: Schema = s, path = ''): ConfigError[] {
+  const schema = deref(s, root)
   if (schema.oneOf) return oneOf(value, schema, root, path)
-  if (typeof schema.type === 'string' && !fits(schema.type, got)) return err(`expected ${schema.type}, got ${got}`)
-  if ('const' in schema && value !== schema.const) return err(`must be ${show(schema.const)}`)
-  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return err(`must be one of ${schema.enum.map(show).join(', ')}`)
-
-  if (typeof value === 'string') {
-    if (typeof schema.minLength === 'number' && value.length < schema.minLength) return err('must not be empty')
-    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value)) return err(`${show(value)} does not match ${schema.pattern}`)
-  }
-  if (typeof value === 'number' && typeof schema.minimum === 'number' && value < schema.minimum) return err(`must be at least ${schema.minimum}`)
-
-  if (Array.isArray(value)) {
-    if (typeof schema.minItems === 'number' && value.length < schema.minItems) return err('must not be empty')
-    if (schema.items) return value.flatMap((v, i) => validate(v, schema.items as Schema, root, join(path, i)))
-    return []
-  }
-  if (!isPlain(value)) return []
-  return object(value, schema, root, path)
+  const bad = shape(value, schema)
+  if (bad) return [{ path, message: bad }]
+  if (Array.isArray(value)) return schema.items ? value.flatMap((v, i) => validate(v, schema.items as Schema, root, join(path, i))) : []
+  return isPlain(value) ? object(value, schema, root, path) : []
 }
 
 function object(value: Record<string, unknown>, schema: Schema, root: Schema, path: string): ConfigError[] {
