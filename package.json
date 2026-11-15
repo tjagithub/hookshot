@@ -1,6 +1,6 @@
 {
   "name": "@tjakit/hookshot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Declarative Claude Code hooks",
   "license": "MIT",
   "repository": {
