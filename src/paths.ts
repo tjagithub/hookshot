@@ -1,6 +1,6 @@
 import { posix } from 'node:path'
 import type { Context } from './context.ts'
-import type { Call, Extraction } from './extract.ts'
+import type { Call, Extraction, Invocation } from './extract.ts'
 import { parseFlags } from './flags.ts'
 import { type WordValue, braceExpansion, display, unescapeBare, zshEquals } from './word.ts'
 
@@ -80,11 +80,12 @@ export function bashTargets(x: Extraction, ctx: Context): { targets: FileTarget[
       for (const path of wordPaths(r.target, ctx, cwdKnown)) targets.push({ op: r.kind, path, source: 'redirect' })
     }
   }
-  for (const inv of x.invocations) {
-    if (inv.name === undefined || !fileWriters.has(inv.name)) continue
-    for (const w of parseFlags(inv.argv).positionals) {
-      for (const path of wordPaths(w, ctx, cwdKnown)) targets.push({ op: 'write', path, source: 'tee', call: inv.call })
-    }
-  }
+  for (const inv of x.invocations) targets.push(...writerTargets(inv, ctx, cwdKnown))
   return { targets, unclassified }
+}
+
+/** Positionals of a fileWriters command (tee) as write targets; none for other commands. */
+function writerTargets(inv: Invocation, ctx: Context, cwdKnown: boolean): FileTarget[] {
+  if (inv.name === undefined || !fileWriters.has(inv.name)) return []
+  return parseFlags(inv.argv).positionals.flatMap((w) => wordPaths(w, ctx, cwdKnown).map((path): FileTarget => ({ op: 'write', path, source: 'tee', call: inv.call })))
 }

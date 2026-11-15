@@ -68,50 +68,55 @@ const usage = `hookshot: declarative Claude Code hooks
   hookshot fetch-parser                    download the prebuilt parser for this platform
 `
 
+// Claude Code lets the call through on most non-zero exits, so a broken rules file must ask instead.
+async function runCommand(rest: string[], io: Io): Promise<number> {
+  let hook: Hook
+  try {
+    if (!rest[0]) throw new UsageError('run needs a rules file')
+    hook = await loadHook(rest[0], io)
+  } catch (e) {
+    const why = `hookshot could not load its rules, so it cannot vouch for this call: ${e instanceof Error ? e.message : String(e)}`
+    io.out(`${JSON.stringify(asking(why))}\n`)
+    return 0
+  }
+  io.out(await respond(hook, await io.stdin()))
+  return 0
+}
+
+type Command = (rest: string[], io: Io) => number | Promise<number>
+
+const commands = new Map<string, Command>([
+  ['run', runCommand],
+  ['test', testCommand],
+  ['check', async (rest, io) => (await import('./config.ts')).checkCommand(rest, io)],
+  ['init', async (rest, io) => (await import('./config.ts')).initCommand(rest, io)],
+  ['install', install],
+  ['uninstall', uninstall],
+  ['fetch-parser', async (rest, io) => (await import('./fetch-parser.ts')).fetchParser(rest, io)],
+])
+
+const helpNames = new Set(['-h', '--help', 'help'])
+
+/** Usage errors (ours and parseArgs') print the usage and exit 2; anything else is rethrown. */
+function usageExit(e: unknown, io: Io): number {
+  const parseError = (e as { code?: unknown }).code?.toString().startsWith('ERR_PARSE_ARGS')
+  if (!(e instanceof UsageError) && !parseError) throw e
+  if (!(e instanceof Error)) throw e
+  io.err(`hookshot: ${e.message}\n\n${usage}`)
+  return 2
+}
+
 export async function main(argv: string[], io: Io = processIo()): Promise<number> {
   const [cmd, ...rest] = argv
   try {
-    switch (cmd) {
-      case 'run': {
-        // Claude Code lets the call through on most non-zero exits, so a broken rules file must ask instead.
-        let hook: Hook
-        try {
-          if (!rest[0]) throw new UsageError('run needs a rules file')
-          hook = await loadHook(rest[0], io)
-        } catch (e) {
-          const why = `hookshot could not load its rules, so it cannot vouch for this call: ${e instanceof Error ? e.message : String(e)}`
-          io.out(`${JSON.stringify(asking(why))}\n`)
-          return 0
-        }
-        io.out(await respond(hook, await io.stdin()))
-        return 0
-      }
-      case 'test':
-        return await testCommand(rest, io)
-      case 'check':
-        return (await import('./config.ts')).checkCommand(rest, io)
-      case 'init':
-        return (await import('./config.ts')).initCommand(rest, io)
-      case 'install':
-        return install(rest, io)
-      case 'uninstall':
-        return uninstall(rest, io)
-      case 'fetch-parser':
-        return await (await import('./fetch-parser.ts')).fetchParser(rest, io)
-      case undefined:
-      case '-h':
-      case '--help':
-      case 'help':
-        io.out(usage)
-        return cmd === undefined ? 2 : 0
-      default:
-        throw new UsageError(`unknown command ${cmd}`)
+    if (cmd === undefined || helpNames.has(cmd)) {
+      io.out(usage)
+      return cmd === undefined ? 2 : 0
     }
+    const command = commands.get(cmd)
+    if (!command) throw new UsageError(`unknown command ${cmd}`)
+    return await command(rest, io)
   } catch (e) {
-    const parseError = (e as { code?: unknown }).code?.toString().startsWith('ERR_PARSE_ARGS')
-    if (!(e instanceof UsageError) && !parseError) throw e
-    if (!(e instanceof Error)) throw e
-    io.err(`hookshot: ${e.message}\n\n${usage}`)
-    return 2
+    return usageExit(e, io)
   }
 }

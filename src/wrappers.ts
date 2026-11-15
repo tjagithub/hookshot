@@ -110,25 +110,32 @@ function wrapperEnd(spec: WrapperSpec, name: string, argv: WordValue[], via: str
   return i
 }
 
+// The wrapper a literal command word names, if any.
+function wrapperOf(w: WordValue | undefined, table: Readonly<Record<string, WrapperSpec>>) {
+  const name = commandName(w)
+  if (name === undefined || w?.kind !== 'literal') return undefined
+  const spec = table[name]
+  return spec ? { name, spec } : undefined
+}
+
+function unwrapped(rest: WordValue[], input: boolean, via: string[]): Unwrapped {
+  if (!rest.length) return { kind: 'none', via }
+  return { kind: 'run', argv: input ? [...rest, inputWord(rest.at(-1)!, '<xargs input>')] : rest, via }
+}
+
 /** Strip wrappers (sudo, env, timeout ...) from the front of argv, per the table above. */
 export function unwrap(argv: WordValue[], table: Readonly<Record<string, WrapperSpec>> = wrappers): Unwrapped {
   const via: string[] = []
   let rest = argv
   let input = false
-  for (;;) {
-    const name = commandName(rest[0])
-    const spec = name !== undefined && rest[0]?.kind === 'literal' ? table[name] : undefined
-    if (!spec || name === undefined) {
-      if (!rest.length) return { kind: 'none', via }
-      return { kind: 'run', argv: input ? [...rest, inputWord(rest.at(-1)!, '<xargs input>')] : rest, via }
-    }
-    input ||= spec.appendsInput === true
-    via.push(name)
-    const end = wrapperEnd(spec, name, rest, via)
+  for (let w = wrapperOf(rest[0], table); w; w = wrapperOf(rest[0], table)) {
+    input ||= w.spec.appendsInput === true
+    via.push(w.name)
+    const end = wrapperEnd(w.spec, w.name, rest, via)
     if (typeof end !== 'number') return end
-    rest = rest.slice(end + (spec.positionals ?? 0))
-    if (!rest.length) return { kind: 'none', via }
+    rest = rest.slice(end + (w.spec.positionals ?? 0))
   }
+  return unwrapped(rest, input, via)
 }
 
 /** The script word of `bash -c SCRIPT` (or `-xc`, `-o x -c`), when there is one. */
@@ -146,24 +153,34 @@ const shellValueLong = new Set(['--rcfile', '--init-file'])
  * 'unknown' when a run-time word could be a flag or the operand.
  */
 export function shellStdin(argv: WordValue[]): boolean | 'unknown' {
-  for (let i = 1; i < argv.length; i++) {
-    const w = argv[i]!
-    if (w.kind !== 'literal') return 'unknown'
-    const t = w.text
-    if (t === '--') {
-      const next = argv[i + 1]
-      return next === undefined || (next.kind === 'literal' && stdinFiles.has(next.text))
-    }
-    if (stdinFiles.has(t)) return true
-    if (!/^[-+]./.test(t)) return false
-    if (t.startsWith('--')) {
-      if (shellValueLong.has(t)) i++
-      continue
-    }
-    if (t.includes('s')) return true
-    if (/[oO]/.test(t)) i++
+  for (let i = 1; i < argv.length; ) {
+    const step = shellStep(argv, i)
+    if (typeof step !== 'number') return step
+    i += step
   }
   return true
+}
+
+// Like Step: words one shell argument uses (1, or 2 with its value), or the final answer.
+type ShellStep = number | boolean | 'unknown'
+
+function shellStep(argv: WordValue[], i: number): ShellStep {
+  const w = argv[i]!
+  if (w.kind !== 'literal') return 'unknown'
+  const t = w.text
+  if (t === '--') {
+    const next = argv[i + 1]
+    return next === undefined || (next.kind === 'literal' && stdinFiles.has(next.text))
+  }
+  if (stdinFiles.has(t)) return true
+  if (!/^[-+]./.test(t)) return false
+  return shellFlagStep(t)
+}
+
+function shellFlagStep(t: string): ShellStep {
+  if (t.startsWith('--')) return shellValueLong.has(t) ? 2 : 1
+  if (t.includes('s')) return true
+  return /[oO]/.test(t) ? 2 : 1
 }
 
 /** Commands run by `find ... -exec CMD ... ;` (or `+`), one argv per -exec. */

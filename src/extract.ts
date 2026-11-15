@@ -1,4 +1,4 @@
-import type { BinaryCmd, CallExpr, Command, IfClause, Redirect, Stmt } from './ast.ts'
+import type { BinaryCmd, CallExpr, CaseClause, Command, IfClause, Redirect, Stmt } from './ast.ts'
 import { isNode, unhandled } from './ast.ts'
 import { type Parsed, parse as defaultParse } from './parse.ts'
 import { type WordValue, display, expandArgv, wordValue } from './word.ts'
@@ -109,18 +109,48 @@ export type Stdin =
   | { kind: 'pipe' }
   | { kind: 'other'; op: string }
 
+// What one redirect makes of stdin; undefined when it leaves stdin as it was.
+function stdinFrom(r: RedirectInfo): Stdin | undefined {
+  if (r.fd !== undefined && r.fd !== '0') return undefined
+  const heredoc = r.op === '<<' || r.op === '<<-'
+  if (r.op === '<<<' && r.target) return { kind: 'text', word: r.target }
+  if (heredoc && r.body) return { kind: 'text', word: r.body }
+  if ((r.op === '<' || r.op === '<>') && r.target) return { kind: 'file', word: r.target }
+  if (r.op === '<&' || heredoc) return { kind: 'other', op: r.op }
+  return undefined
+}
+
 // The last redirect of fd 0 wins, as in the shell.
 function stdinOf(redirects: readonly RedirectInfo[]): Stdin | undefined {
   let out: Stdin | undefined
-  for (const r of redirects) {
-    if (r.fd !== undefined && r.fd !== '0') continue
-    if (r.op === '<<<' && r.target) out = { kind: 'text', word: r.target }
-    else if ((r.op === '<<' || r.op === '<<-') && r.body) out = { kind: 'text', word: r.body }
-    else if ((r.op === '<' || r.op === '<>') && r.target) out = { kind: 'file', word: r.target }
-    else if (r.op === '<&' || r.op === '<<' || r.op === '<<-') out = { kind: 'other', op: r.op }
-  }
+  for (const r of redirects) out = stdinFrom(r) ?? out
   return out
 }
+
+function redirectInfo(r: Redirect, at: Ctx): RedirectInfo {
+  const target = r.Word ? wordValue(r.Word) : undefined
+  const info: RedirectInfo = { op: r.Op, kind: classifyRedirect(r.Op, target), script: at.script, origin: at.origin }
+  if (target) info.target = target
+  if (r.Hdoc) info.body = wordValue(r.Hdoc)
+  if (r.N?.Value) info.fd = r.N.Value
+  return info
+}
+
+// A nested script is editable in place only when it is one plain single-quoted word of a script with a known base.
+function nestedOrigin(word: WordValue | string, base: number | null, quotedWord?: WordValue): Origin {
+  const q = quotedWord ?? (typeof word === 'string' ? undefined : word)
+  const sgl = q?.quoting === 'single' && q.word.Parts[0]?.Type === 'SglQuoted' && !q.word.Parts[0]?.Dollar
+  return sgl && base !== null && q !== undefined ? { kind: 'single-quoted', base: base + q.start + 1 } : { kind: 'opaque' }
+}
+
+// The values scan descends into: array items, or the fields of a node other than its positions.
+function children(v: unknown): unknown[] {
+  if (Array.isArray(v)) return v
+  if (!isNode(v)) return []
+  return Object.entries(v).filter(([k]) => k !== 'Pos' && k !== 'End').map(([, x]) => x)
+}
+
+type StmtInfo = Omit<Call, 'id' | 'words' | 'assigns' | 'standalone'>
 
 const truncate = (s: string) => (s.length > 60 ? `${s.slice(0, 57)}...` : s)
 
@@ -143,25 +173,17 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
 
   // Walks any subtree that is not a statement list, entering only $(...) and <(...) bodies.
   async function scan(v: unknown, ctx: Ctx): Promise<void> {
-    if (Array.isArray(v)) {
-      for (const x of v) await scan(x, ctx)
-    } else if (isNode(v)) {
-      if (v.Type === 'CmdSubst' || v.Type === 'ProcSubst') {
-        await walkStmts((v as { Stmts?: Stmt[] }).Stmts ?? [], { ...ctx, inSubst: true }, false)
-        return
-      }
-      for (const [k, x] of Object.entries(v)) if (k !== 'Pos' && k !== 'End') await scan(x, ctx)
+    if (isNode(v) && (v.Type === 'CmdSubst' || v.Type === 'ProcSubst')) {
+      return walkStmts((v as { Stmts?: Stmt[] }).Stmts ?? [], { ...ctx, inSubst: true }, false)
     }
+    for (const x of children(v)) await scan(x, ctx)
   }
 
   async function nested(word: WordValue | string, how: string, ctx: Ctx, quotedWord?: WordValue) {
     if (out.scripts >= maxScripts) return unknown('budget', `more than ${maxScripts} scripts; ${how} not checked`)
     if (typeof word !== 'string' && word.kind === 'dynamic') return unknown('dynamic', `${how} ${word.hint}`)
     const text = typeof word === 'string' ? word : word.text
-    const q = quotedWord ?? (typeof word === 'string' ? undefined : word)
-    const sgl = q?.quoting === 'single' && q.word.Parts[0]?.Type === 'SglQuoted' && !q.word.Parts[0]?.Dollar
-    const editable = sgl && ctx.base !== null && q !== undefined
-    const origin: Origin = editable ? { kind: 'single-quoted', base: ctx.base! + q.start + 1 } : { kind: 'opaque' }
+    const origin = nestedOrigin(word, ctx.base, quotedWord)
     const script = out.scripts++
     const parsed = await parseScript(text)
     if (parsed === 'unavailable') return
@@ -179,20 +201,32 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     const inv: Invocation = name === undefined ? { call, argv: u.argv, via: chain } : { call, argv: u.argv, name, via: chain }
     out.invocations.push(inv)
     for (const stage of ctx.stages) stage.push(inv)
+    if (name !== undefined) await special(name, u.argv, call, chain, ctx)
+  }
 
-    if (name === 'find') for (const sub of findExecs(u.argv)) await invoke(sub, call, [...chain, 'find -exec'], ctx)
-    const script = shellScriptWord(u.argv)
-    if (name && script && parsedShells.has(name)) await nested(script, `${name} -c`, { ...ctx, via: chain })
-    if (name && script && opaqueShells.has(name)) unknown('opaque-shell', `${name} -c is not bash or zsh`)
-    const shell = name !== undefined && (parsedShells.has(name) || opaqueShells.has(name))
-    if (shell && !script) await stdinScript(name, parsedShells.has(name), shellStdin(u.argv), { ...ctx, via: chain })
-    if (name === 'source' || name === '.') await sourced(name, u.argv[1], { ...ctx, via: chain })
-    if (name === 'eval') {
-      const args = u.argv.slice(1)
-      const dyn = args.find((w) => w.kind === 'dynamic')
-      if (dyn) unknown('dynamic', `eval ${dyn.kind === 'dynamic' ? dyn.hint : ''}`)
-      else await nested(args.map((w) => (w.kind === 'literal' ? w.text : '')).join(' '), 'eval', { ...ctx, via: chain })
-    }
+  // Commands that run other commands or scripts: find -exec, shells, source, eval.
+  async function special(name: string, argv: WordValue[], call: Call, chain: string[], ctx: Ctx) {
+    if (name === 'find') return findExec(argv, call, chain, ctx)
+    if (parsedShells.has(name) || opaqueShells.has(name)) return shell(name, argv, { ...ctx, via: chain })
+    if (name === 'source' || name === '.') return sourced(name, argv[1], { ...ctx, via: chain })
+    if (name === 'eval') return evaluated(argv.slice(1), { ...ctx, via: chain })
+  }
+
+  async function findExec(argv: WordValue[], call: Call, chain: string[], ctx: Ctx) {
+    for (const sub of findExecs(argv)) await invoke(sub, call, [...chain, 'find -exec'], ctx)
+  }
+
+  async function shell(name: string, argv: WordValue[], ctx: Ctx) {
+    const script = shellScriptWord(argv)
+    if (!script) return stdinScript(name, parsedShells.has(name), shellStdin(argv), ctx)
+    if (parsedShells.has(name)) await nested(script, `${name} -c`, ctx)
+    if (opaqueShells.has(name)) unknown('opaque-shell', `${name} -c is not bash or zsh`)
+  }
+
+  async function evaluated(args: WordValue[], ctx: Ctx) {
+    const dyn = args.find((w) => w.kind === 'dynamic')
+    if (dyn) return void unknown('dynamic', `eval ${dyn.kind === 'dynamic' ? dyn.hint : ''}`)
+    await nested(args.map((w) => (w.kind === 'literal' ? w.text : '')).join(' '), 'eval', ctx)
   }
 
   // A shell (or source) reading its script from stdin: literal text is parsed like -c; a pipe or a run-time file is unknown.
@@ -212,7 +246,7 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
     if (file?.segments.some((s) => typeof s !== 'string' && s.dynamic === '$(…)')) unknown('dynamic', `${name} ${file.hint}`)
   }
 
-  async function walkCall(cmd: CallExpr, stmt: Omit<Call, 'id' | 'words' | 'assigns' | 'standalone'>, alone: boolean, ctx: Ctx) {
+  async function walkCall(cmd: CallExpr, stmt: StmtInfo, alone: boolean, ctx: Ctx) {
     await scan(cmd.Assigns, ctx)
     await scan(cmd.Args, ctx)
     const words = (cmd.Args ?? []).map(wordValue)
@@ -235,27 +269,30 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
   async function walkStmt(s: Stmt, at: Ctx, standalone: boolean): Promise<void> {
     const background = Boolean(s.Background || s.Disown || s.Coprocess)
     const negated = Boolean(s.Negated)
-    const redirects = (s.Redirs ?? []).map((r: Redirect): RedirectInfo => {
-      const target = r.Word ? wordValue(r.Word) : undefined
-      const info: RedirectInfo = { op: r.Op, kind: classifyRedirect(r.Op, target), script: at.script, origin: at.origin }
-      if (target) info.target = target
-      if (r.Hdoc) info.body = wordValue(r.Hdoc)
-      if (r.N?.Value) info.fd = r.N.Value
-      return info
-    })
+    const redirects = (s.Redirs ?? []).map((r) => redirectInfo(r, at))
     const own = stdinOf(redirects)
     const ctx: Ctx = own ? { ...at, stdin: own } : at
     out.redirects.push(...redirects)
     await scan(s.Redirs, ctx)
+    if (!s.Cmd) return
     const alone = standalone && !background && !negated && !redirects.length && !ctx.inSubst && ctx.origin.kind === 'top'
-    const cmd = s.Cmd
-    if (!cmd) return
     const stmt = { script: ctx.script, origin: ctx.origin, base: ctx.base, background, negated, redirects, inSubstitution: ctx.inSubst }
     const withPipe = ctx.pipeline ? { ...stmt, pipeline: ctx.pipeline } : stmt
+    return walkCommand(s, s.Cmd, withPipe, alone, ctx)
+  }
 
+  async function walkCase(c: CaseClause, ctx: Ctx) {
+    await scan(c.Word, ctx)
+    for (const item of c.Items ?? []) {
+      await scan(item.Patterns, ctx)
+      await walkStmts(item.Stmts ?? [], ctx, false)
+    }
+  }
+
+  async function walkCommand(s: Stmt, cmd: Command, stmt: StmtInfo, alone: boolean, ctx: Ctx): Promise<void> {
     switch (cmd.Type) {
       case 'CallExpr':
-        return walkCall(cmd, withPipe, alone, ctx)
+        return walkCall(cmd, stmt, alone, ctx)
       case 'BinaryCmd':
         return walkBinary(s, cmd, alone, ctx)
       case 'Subshell':
@@ -269,12 +306,7 @@ export async function extract(command: string, opts: ExtractOptions = {}): Promi
         await scan(cmd.Loop, ctx)
         return walkStmts(cmd.Do ?? [], ctx, false)
       case 'CaseClause':
-        await scan(cmd.Word, ctx)
-        for (const item of cmd.Items ?? []) {
-          await scan(item.Patterns, ctx)
-          await walkStmts(item.Stmts ?? [], ctx, false)
-        }
-        return
+        return walkCase(cmd, ctx)
       case 'FuncDecl':
         return cmd.Body ? walkStmt(cmd.Body, ctx, false) : undefined
       case 'TimeClause':

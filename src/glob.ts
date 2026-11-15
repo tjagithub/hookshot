@@ -21,21 +21,7 @@ export function expandBraces(p: string): string[] {
     if (c === '\\') i++
     else if (c === '{' && depth++ === 0) open = i
     else if (c === '}' && depth > 0 && --depth === 0) {
-      const body = p.slice(open + 1, i)
-      const parts: string[] = []
-      let d = 0
-      let from = 0
-      for (let j = 0; j < body.length; j++) {
-        const b = body[j]
-        if (b === '\\') j++
-        else if (b === '{') d++
-        else if (b === '}') d--
-        else if (b === ',' && d === 0) {
-          parts.push(body.slice(from, j))
-          from = j + 1
-        }
-      }
-      parts.push(body.slice(from))
+      const parts = splitAlternatives(p.slice(open + 1, i))
       if (parts.length === 1) continue // `{x}` is literal, as in bash
       const head = p.slice(0, open)
       const out = parts.flatMap((m) => expandBraces(head + m + p.slice(i + 1)))
@@ -44,6 +30,25 @@ export function expandBraces(p: string): string[] {
     }
   }
   return [p]
+}
+
+/** Splits a brace body at top-level commas, skipping escaped characters and nested braces. */
+function splitAlternatives(body: string): string[] {
+  const parts: string[] = []
+  let d = 0
+  let from = 0
+  for (let j = 0; j < body.length; j++) {
+    const b = body[j]
+    if (b === '\\') j++
+    else if (b === '{') d++
+    else if (b === '}') d--
+    else if (b === ',' && d === 0) {
+      parts.push(body.slice(from, j))
+      from = j + 1
+    }
+  }
+  parts.push(body.slice(from))
+  return parts
 }
 
 const escape = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

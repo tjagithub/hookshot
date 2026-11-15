@@ -32,25 +32,33 @@ export class PipeRule extends Terminal<PipeMatch> implements Rule {
   protected override bash(x: Extraction, ctx: Context): Verdict {
     const out: Verdict[] = []
     for (const pipeline of x.pipelines) {
-      let found: PipeMatch | undefined
-      let maybe: Tri = false
-      for (const [i, left] of pipeline.stages.entries()) {
-        for (const right of pipeline.stages.slice(i + 1)) {
-          for (const a of left) {
-            for (const b of right) {
-              const t = and(this.from.matches(a), this.to.matches(b))
-              if (t === true) found ??= { pipeline, from: a, to: b }
-              maybe = or(maybe, t)
-            }
-          }
-        }
-      }
-      if (found) out.push(this.act(found, ctx))
-      else if (maybe === 'unknown') {
-        out.push(unknown({ why: 'dynamic', rule: this.name, detail: 'a pipeline stage is only known at run time' }))
-      }
+      const v = this.pipeline(pipeline, ctx)
+      if (v) out.push(v)
     }
     return out.length ? combine(...out) : pass()
+  }
+
+  /** The first matching pair acts; else unknown if any pair could match. Every pair is evaluated. */
+  private pipeline(pipeline: Pipeline, ctx: Context): Verdict | undefined {
+    let found: PipeMatch | undefined
+    let maybe: Tri = false
+    for (const [a, b] of stagePairs(pipeline)) {
+      const t = and(this.from.matches(a), this.to.matches(b))
+      if (t === true) found ??= { pipeline, from: a, to: b }
+      maybe = or(maybe, t)
+    }
+    if (found) return this.act(found, ctx)
+    if (maybe === 'unknown') return unknown({ why: 'dynamic', rule: this.name, detail: 'a pipeline stage is only known at run time' })
+    return undefined
+  }
+}
+
+/** Every (earlier, later) invocation pair of a pipeline, in stage order. */
+function* stagePairs(pipeline: Pipeline): Generator<[Invocation, Invocation]> {
+  const { stages } = pipeline
+  for (const [i, left] of stages.entries()) {
+    const later = stages.slice(i + 1).flat()
+    for (const a of left) for (const b of later) yield [a, b]
   }
 }
 

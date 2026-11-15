@@ -63,28 +63,44 @@ function output(outcome: Outcome, toolInput: Record<string, unknown>): PreToolUs
   }
 }
 
+function toolName(i: HookInput, toolInput: Record<string, unknown>): string | undefined {
+  if (typeof i.tool_name === 'string') return i.tool_name
+  return typeof toolInput.command === 'string' ? 'Bash' : undefined
+}
+
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v !== ''
+
+function overrides(i: HookInput, defaults: Partial<Context>): Partial<Context> {
+  return {
+    ...defaults,
+    ...(nonEmpty(i.cwd) ? { cwd: i.cwd } : {}),
+    ...(nonEmpty(i.session_id) ? { sessionId: i.session_id } : {}),
+  }
+}
+
+async function handleBash(hook: Hook, toolInput: Record<string, unknown>, over: Partial<Context>): Promise<PreToolUseOutput | null> {
+  const command = toolInput.command
+  if (!nonEmpty(command)) return null
+  return output((await hook.evaluate(command, over)).outcome, toolInput)
+}
+
+async function handleFile(hook: Hook, tool: string, op: FileOp, toolInput: Record<string, unknown>, over: Partial<Context>): Promise<PreToolUseOutput | null> {
+  const raw = toolInput.file_path ?? toolInput.notebook_path
+  if (!nonEmpty(raw)) return asking(`hookshot: ${tool} call without a file path, so it cannot check it`)
+  const file: FileTarget = { op, path: resolvePath(raw, context(over)), source: 'tool', tool }
+  return output((await hook.evaluateFile(file, over)).outcome, toolInput)
+}
+
 /** Input without tool_name but with a command is treated as Bash. Tools hookshot does not know get null. */
 export async function handlePreToolUse(hook: Hook, input: unknown, defaults: Partial<Context> = {}): Promise<PreToolUseOutput | null> {
   const i = (input ?? {}) as HookInput
   const toolInput = i.tool_input ?? {}
-  const tool = typeof i.tool_name === 'string' ? i.tool_name : typeof toolInput.command === 'string' ? 'Bash' : undefined
-  const over: Partial<Context> = {
-    ...defaults,
-    ...(typeof i.cwd === 'string' && i.cwd ? { cwd: i.cwd } : {}),
-    ...(typeof i.session_id === 'string' && i.session_id ? { sessionId: i.session_id } : {}),
-  }
-
-  if (tool === 'Bash') {
-    const command = toolInput.command
-    if (typeof command !== 'string' || !command) return null
-    return output((await hook.evaluate(command, over)).outcome, toolInput)
-  }
+  const tool = toolName(i, toolInput)
+  const over = overrides(i, defaults)
+  if (tool === 'Bash') return handleBash(hook, toolInput, over)
   const op = tool !== undefined ? fileTools[tool] : undefined
-  if (!op) return null
-  const raw = toolInput.file_path ?? toolInput.notebook_path
-  if (typeof raw !== 'string' || !raw) return asking(`hookshot: ${tool} call without a file path, so it cannot check it`)
-  const file: FileTarget = { op, path: resolvePath(raw, context(over)), source: 'tool', tool }
-  return output((await hook.evaluateFile(file, over)).outcome, toolInput)
+  if (!op || tool === undefined) return null
+  return handleFile(hook, tool, op, toolInput, over)
 }
 
 /** Read hook input from stdin, print the decision. Bad input or an internal error asks, never allows. */

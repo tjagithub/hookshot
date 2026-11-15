@@ -37,10 +37,20 @@ function deref(schema: Schema, root: Schema): Schema {
 
 // The keywords on the value itself, before items and properties; the first one broken.
 function shape(value: unknown, schema: Schema): string | undefined {
+  return kind(value, schema) ?? bounds(value, schema)
+}
+
+// type, const and enum.
+function kind(value: unknown, schema: Schema): string | undefined {
   const got = typeOf(value)
   if (typeof schema.type === 'string' && !fits(schema.type, got)) return `expected ${schema.type}, got ${got}`
   if ('const' in schema && value !== schema.const) return `must be ${show(schema.const)}`
   if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return `must be one of ${schema.enum.map(show).join(', ')}`
+  return undefined
+}
+
+// minLength, minItems, pattern and minimum.
+function bounds(value: unknown, schema: Schema): string | undefined {
   const size = typeof value === 'string' ? schema.minLength : Array.isArray(value) ? schema.minItems : undefined
   if (typeof size === 'number' && (value as string | unknown[]).length < size) return 'must not be empty'
   if (typeof value === 'string' && typeof schema.pattern === 'string' && !new RegExp(schema.pattern).test(value)) {
@@ -64,17 +74,20 @@ function object(value: Record<string, unknown>, schema: Schema, root: Schema, pa
   const out: ConfigError[] = []
   const props = (schema.properties ?? {}) as Record<string, Schema>
   for (const k of (schema.required ?? []) as string[]) if (!(k in value)) out.push({ path, message: `missing ${show(k)}` })
-  for (const [k, v] of Object.entries(value)) {
-    const at = join(path, k)
-    const names = schema.propertyNames as Schema | undefined
-    if (names) out.push(...validate(k, names, root, at).map((e) => ({ ...e, message: `key ${e.message}` })))
-    if (props[k]) out.push(...validate(v, props[k], root, at))
-    else if (schema.additionalProperties === false) out.push({ path: at, message: `unknown key ${show(k)}` })
-    else if (isPlain(schema.additionalProperties)) out.push(...validate(v, schema.additionalProperties, root, at))
-  }
+  for (const [k, v] of Object.entries(value)) out.push(...entry(k, v, schema, props, root, join(path, k)))
   for (const [k, needs] of Object.entries((schema.dependentRequired ?? {}) as Record<string, string[]>)) {
     if (k in value && !needs.every((n) => n in value)) out.push({ path: join(path, k), message: `only applies with ${needs.map(show).join(', ')}` })
   }
+  return out
+}
+
+// One key and its value: propertyNames, then properties or additionalProperties.
+function entry(k: string, v: unknown, schema: Schema, props: Record<string, Schema>, root: Schema, at: string): ConfigError[] {
+  const names = schema.propertyNames as Schema | undefined
+  const out = names ? validate(k, names, root, at).map((e) => ({ ...e, message: `key ${e.message}` })) : []
+  if (props[k]) return [...out, ...validate(v, props[k], root, at)]
+  if (schema.additionalProperties === false) return [...out, { path: at, message: `unknown key ${show(k)}` }]
+  if (isPlain(schema.additionalProperties)) return [...out, ...validate(v, schema.additionalProperties, root, at)]
   return out
 }
 
