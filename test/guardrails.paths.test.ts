@@ -19,3 +19,11 @@ describe('guardrails: .env writes', () => {
     expect(await decide(input)).toBe(want)
   })
 })
+
+describe('guardrails: rewrites keep the bytes they do not edit', () => {
+  // bash-guard drops trailing newlines here; the port only replaces the grep word.
+  test.each([['grep x\n'], ['grep x \n\n'], ['ls\ngrep -n x f\n']])('%j', async (command) => {
+    const out = await handlePreToolUse(guardrails, { tool_name: 'Bash', tool_input: { command } }, ctx)
+    expect(out?.hookSpecificOutput.updatedInput?.command).toBe(command.replace('grep', 'rg'))
+  })
+})

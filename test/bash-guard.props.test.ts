@@ -2,7 +2,7 @@ import { fc, test } from '@fast-check/vitest'
 import { afterAll, describe, expect } from 'vitest'
 import { parse } from '../src/parse.ts'
 import { grepCommand, numRuns, quotedEcho, shellSoup } from './support/arbitraries.ts'
-import { type Impl, available, hasShfmt, implName, runGuard, severity } from './support/guard.ts'
+import { type GuardResult, type Impl, available, hasShfmt, implName, runGuard, severity } from './support/guard.ts'
 
 const opts = { numRuns }
 const reference: Impl = { impl: 'reference', parser: 'shfmt' }
@@ -49,6 +49,10 @@ test.prop([fc.oneof(shellSoup, grepCommand)], opts)('shfmt and sh-syntax agree i
   expect({ d: b.decision, u: b.updated }).toEqual({ d: a.decision, u: a.updated })
 })
 
+// bash-guard is bash: command substitution drops the trailing newlines of a rewrite. The port keeps
+// every byte it did not edit (test/guardrails.paths.test.ts pins it), so compare without them.
+const trimmed = (u: GuardResult['updated']) => (u ? { ...u, command: String(u.command).replace(/\n+$/, '') } : u)
+
 // The port may be stricter than bash-guard (it asks where bash-guard guessed), never looser.
 describe.skipIf(!available(port) || !hasShfmt)('port against bash-guard', () => {
   const stricter: string[] = []
@@ -63,9 +67,9 @@ describe.skipIf(!available(port) || !hasShfmt)('port against bash-guard', () => 
       stricter.push(`${ref.decision} -> ${got.decision}: ${cmd}`)
       return
     }
-    expect({ decision: got.decision, updated: got.updated }, `${cmd}\n${got.reason}`).toEqual({
+    expect({ decision: got.decision, updated: trimmed(got.updated) }, `${cmd}\n${got.reason}`).toEqual({
       decision: ref.decision,
-      updated: ref.updated,
+      updated: trimmed(ref.updated),
     })
   })
 })
