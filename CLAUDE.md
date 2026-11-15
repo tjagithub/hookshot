@@ -19,7 +19,8 @@ Declarative Claude Code hooks. Rules run on a parsed shell tree (mvdan/sh in Go,
 - mvdan's typed JSON omits empty fields (`Lit.Value` for `''`); offsets are UTF-8 bytes, not string indices.
 - mvdan normalises zsh `>!` to `>|`.
 - Deno throws on `process.env` without `--allow-env` and on `os.homedir()` without `--allow-sys`. Use `homeDir()` from `src/context.ts`, not `homedir()`. A CLI test runs under deno to catch this.
+- Tests make temp dirs with `tempDirs()` from `test/support/tmp.ts`, which removes them after the file; don't call `mkdtempSync` directly.
 - Tests stub `jouet` on PATH (`test/support/guard.ts`); don't depend on tools of the dev machine. In CI (`CI` set), `test/backends.test.ts` fails instead of skipping when the addon, shfmt, bun or deno is missing.
 - Release workflow: no build caches (zizmor cache-poisoning), actions pinned by SHA. `setup-node` caches on its own when `packageManager` is set, so it needs `package-manager-cache: false`.
-- `hookshot fetch-parser` downloads from release `v<package.json version>`: bump the version before tagging.
+- Release: bump `version` in package.json, commit, then push the tag by name (`git push origin vX.Y.Z`; plain `git push` sends no tags). `hookshot fetch-parser` downloads from release `v<package.json version>`. The release job waits for all four builds; darwin-x64 (Intel runner) is the slowest.
 - `test/cases.ts` is shared with the bash-guard reference. Port-only behaviour (pipe and path rules) goes in its own test file, such as `test/guardrails.paths.test.ts`.
