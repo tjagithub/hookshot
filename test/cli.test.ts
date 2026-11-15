@@ -69,6 +69,28 @@ describe('hookshot run', () => {
     expect(r.status).toBe(0)
     expect(JSON.parse(r.stdout)).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
   })
+  describe('a rules file that imports the package by name, with no node_modules', () => {
+    const outside = () => {
+      const dir = tmp()
+      writeFileSync(join(dir, 'hooks.ts'), "import { cmd, hooks } from '@tjakit/hookshot'\nexport default hooks([cmd('rm').ask('rm')])\n")
+      return dir
+    }
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm x' } })
+    test('node resolves it to the running CLI', () => {
+      const dir = outside()
+      const r = spawnSync('node', [join(repo, 'bin/hookshot.ts'), 'test', 'hooks.ts', 'rm x', 'ls'], { cwd: dir, encoding: 'utf8' })
+      expect(r.stderr).toBe('')
+      expect(r.stdout).toBe('ask    rm x\n       [rm] rm\nallow  ls\n')
+    })
+    test('bun --no-install cannot, so run asks and says how to fix it', () => {
+      const dir = outside()
+      const r = spawnSync('bun', ['--no-install', join(repo, 'bin/hookshot.ts'), 'run', 'hooks.ts'], { cwd: dir, input, encoding: 'utf8' })
+      expect(r.status).toBe(0)
+      const out = JSON.parse(r.stdout) as { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } }
+      expect(out.hookSpecificOutput.permissionDecision).toBe('ask')
+      expect(out.hookSpecificOutput.permissionDecisionReason).toContain('--runtime node')
+    })
+  })
   test.skipIf(spawnSync('deno', ['--version']).status !== 0)('in deno without --allow-sys (homedir would throw)', () => {
     const input = JSON.stringify({ tool_name: 'Write', tool_input: { file_path: `${repo}/.env` }, cwd: repo })
     const args = ['run', '--allow-read', '--allow-env', join(repo, 'bin/hookshot.ts'), 'run', rules]
@@ -109,7 +131,9 @@ describe('hookshot install / uninstall', () => {
     const t = io({ cwd })
     expect(await main(['install', 'rules.ts', '--scope', 'project', '--runtime', 'bun'], t.io)).toBe(0)
     const entry = settings(join(cwd, '.claude/settings.json')).hooks?.PreToolUse?.[0] as { hooks: { args: string[] }[] }
-    expect(entry.hooks[0]?.args.slice(1)).toEqual(['run', '${CLAUDE_PROJECT_DIR}/rules.ts'])
+    expect(entry.hooks[0]?.args).toEqual(['--no-install', join(repo, 'bin/hookshot.ts'), 'run', '${CLAUDE_PROJECT_DIR}/rules.ts'])
+    expect(await main(['install', 'rules.ts', '--scope', 'project', '--runtime', 'bun'], t.io)).toBe(0)
+    expect(t.out()).toContain('already installed')
   })
 
   test('--dry-run writes nothing; broken settings are left alone', async () => {

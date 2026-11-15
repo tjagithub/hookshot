@@ -48,6 +48,13 @@ describe('the npm package', () => {
     expect(out).toBe('ask    rm -rf x\n       [rm] rm\nallow  ls\n')
   })
 
+  test('like a global install: rules elsewhere, with no node_modules, resolve to the installed CLI', () => {
+    const elsewhere = mk('hookshot-rules-')
+    writeFileSync(join(elsewhere, 'hooks.ts'), "import { cmd, hooks } from '@tjakit/hookshot'\nexport default hooks([cmd('rm').deny('no')])\n")
+    const bin = join(proj, 'node_modules/@tjakit/hookshot/dist/bin/hookshot.js')
+    expect(run('node', [bin, 'test', 'hooks.ts', 'rm x'], elsewhere)).toBe('deny   rm x\n       [rm] no\n')
+  })
+
   test('the installed package finds its parser and installs a hook that points into node_modules', async () => {
     const script = "import('@tjakit/hookshot').then(async (h) => { await h.parse('ls', 'bash'); console.log(JSON.stringify(h.parserStatus())) })"
     const status = JSON.parse(run('node', ['--input-type=module', '-e', script], proj)) as { active?: string; nativeFile?: string }

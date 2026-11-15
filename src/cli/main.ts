@@ -1,10 +1,10 @@
-import { accessSync, constants } from 'node:fs'
-import { delimiter, join, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { asking, respond } from '../claude.ts'
 import { homeDir } from '../context.ts'
 import type { Hook } from '../hook.ts'
+import { pkgName } from '../root.ts'
 import { install, uninstall } from './install.ts'
 import { testCommand } from './test.ts'
 
@@ -35,20 +35,15 @@ export const processIo = (): Io => ({
 
 export class UsageError extends Error {}
 
-export function onPath(bin: string, env: Io['env']): boolean {
-  for (const dir of (env.PATH ?? '').split(delimiter)) {
-    try {
-      accessSync(join(dir, bin), constants.X_OK)
-      return true
-    } catch {}
-  }
-  return false
-}
 
 /** A rules file `export default`s a Hook (from hooks()). */
 export async function loadHook(file: string, io: Io): Promise<Hook> {
   const abs = resolve(io.cwd, file)
-  const mod = (await import(pathToFileURL(abs).href)) as { default?: unknown }
+  const mod = (await import(pathToFileURL(abs).href).catch((e: unknown) => {
+    if (!String(e).includes(pkgName)) throw e
+    const hint = 'install it next to the rules file, or run the hook on node (`hookshot install --runtime node`), which resolves it to this CLI'
+    throw new Error(`${file} imports ${pkgName}, which this runtime cannot find: ${hint}`, { cause: e })
+  })) as { default?: unknown }
   const h = mod.default as Partial<Hook> | undefined
   if (!h || typeof h.evaluate !== 'function' || typeof h.evaluateFile !== 'function') {
     throw new UsageError(`${file} must \`export default hooks([...])\``)

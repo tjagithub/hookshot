@@ -54,22 +54,23 @@ Things to note in this output:
 
 ## Install
 
-Your rules file imports the package, so install it where that file can resolve it. A global install is not enough. For rules of your own across all projects:
+For rules of your own across all projects:
 
 ```sh
-mkdir -p ~/.claude/hookshot && cd ~/.claude/hookshot
-npm init -y && npm install @tjakit/hookshot
-# write hooks.ts here, then:
-npx hookshot test hooks.ts 'git push -f'
-npx hookshot install hooks.ts --scope user
+npm install -g @tjakit/hookshot
+# write ~/.claude/hooks.ts, importing from '@tjakit/hookshot', then:
+hookshot test ~/.claude/hooks.ts 'git push -f'
+hookshot install ~/.claude/hooks.ts --scope user
 ```
+
+On node, the CLI resolves `@tjakit/hookshot` in your rules file to its own copy, so the rules need no `node_modules` and always run against the CLI's version. Bun and deno cannot do this: with them, install the package next to the rules file. A bun hook runs with `--no-install`, so a missing package is an ask, not a download.
 
 For a project, add it as a dev dependency and use `--scope project`. The package includes the native parsers for darwin and linux (arm64 and x64) and the WASM fallback, so nothing is downloaded at install time.
 
 Requirements:
 
 - **Claude Code v2.1.295 or later.** Older versions have no `onFailure` field, so there a hook that cannot start (no runtime, a moved file, a timeout) lets the tool call through.
-- **A runtime:** node 22.18 or later (it strips the types of your `hooks.ts`), bun or deno. The hook runs on bun when it is on `PATH`, else node; `--runtime` chooses.
+- **A runtime:** node 22.18 or later (it strips the types of your `hooks.ts`), bun or deno. The hook runs on the runtime you ran `install` with; `--runtime` chooses.
 
 ## Rules
 

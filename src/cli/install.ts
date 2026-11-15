@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { fileTools } from '../claude.ts'
 import { binUrl } from '../root.ts'
-import { type Io, UsageError, onPath } from './main.ts'
+import { type Io, UsageError } from './main.ts'
 
 export const matcher = ['Bash', ...Object.keys(fileTools)].join('|')
 const scopes = ['user', 'project', 'local'] as const
@@ -39,7 +39,11 @@ function portable(abs: string, scope: Scope, io: Io): string {
   return `\${CLAUDE_PROJECT_DIR}/${rel.split(sep).join('/')}`
 }
 
-const isOurs = (h: CommandHook, rules: string) => h.args?.[1] === 'run' && /hookshot\.[jt]s$/.test(h.args[0] ?? '') && h.args[2] === rules
+function isOurs(h: CommandHook, rules: string): boolean {
+  const a = h.args ?? []
+  const i = a.findIndex((x) => /hookshot\.[jt]s$/.test(x))
+  return i >= 0 && a[i + 1] === 'run' && a[i + 2] === rules
+}
 
 function read(file: string): Settings {
   if (!existsSync(file)) return {}
@@ -75,7 +79,8 @@ function parse(args: string[], io: Io, extra: Record<string, { type: 'string' | 
 
 export function install(args: string[], io: Io): number {
   const { values, scope, file, rules } = parse(args, io, { runtime: { type: 'string' } })
-  const runtime = (values.runtime as string | undefined) ?? (onPath('bun', io.env) ? 'bun' : 'node')
+  // Default: the runtime this install runs on. Only node resolves the package for a global install.
+  const runtime = (values.runtime as string | undefined) ?? ('Bun' in globalThis ? 'bun' : 'node')
   if (runtime !== 'bun' && runtime !== 'node') throw new UsageError('--runtime must be bun or node')
   const s = read(file)
   const groups = (s.hooks ??= {}).PreToolUse ??= []
@@ -84,7 +89,9 @@ export function install(args: string[], io: Io): number {
     return 0
   }
   // `run` always exits 0; onFailure covers what it can't: a missing runtime, a moved file, a timeout.
-  const hook: CommandHook = { type: 'command', command: runtime, args: [portable(binPath(), scope, io), 'run', rules], onFailure: 'block' }
+  // --no-install: bun would otherwise fetch a missing package from npm inside the hook.
+  const pre = runtime === 'bun' ? ['--no-install'] : []
+  const hook: CommandHook = { type: 'command', command: runtime, args: [...pre, portable(binPath(), scope, io), 'run', rules], onFailure: 'block' }
   const entry: MatcherGroup = { matcher, hooks: [hook] }
   groups.push(entry)
   io.out(`${values['dry-run'] ? 'would add' : 'adding'} to ${file} hooks.PreToolUse:\n${JSON.stringify(entry, null, 2)}\n`)
