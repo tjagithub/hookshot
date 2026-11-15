@@ -39,6 +39,7 @@ Bash expands globs and braces in a redirect target, and `tee` gets its arguments
 | --- | --- | --- |
 | Wrappers | `sudo`, `env`, `command`, `builtin`, `exec`, `nohup`, `time`, `timeout`, `nice` … | unwrapped; `.via()` sees them |
 | `env -S` | `env -S 'rm -rf ~'` | `Unknown` (`opaque-wrapper`) |
+| Wrapper flags that run nothing | `sudo -e grep a` (edits the files), `command -v rm` | no command; a cluster such as `-exec` is `-e -x -e -c` |
 | `eval`, functions | `eval 'rm -rf ~'`, `f(){ rm -rf ~; }` | checked |
 | `find -exec` | `find ~ -exec rm -rf {} \;` | checked; `{}` is dynamic (the found path) |
 | `xargs` | `find ~ \| xargs rm -rf` | checked, with one dynamic word for its input appended (also with `-I`) |

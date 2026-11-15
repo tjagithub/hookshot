@@ -1,5 +1,6 @@
 import { fc, test } from '@fast-check/vitest'
 import { afterAll, describe, expect } from 'vitest'
+import { extract } from '../src/extract.ts'
 import { parse } from '../src/parse.ts'
 import { grepCommand, numRuns, quotedEcho, shellSoup } from './support/arbitraries.ts'
 import { type GuardResult, type Impl, available, hasShfmt, implName, runGuard, severity } from './support/guard.ts'
@@ -56,15 +57,23 @@ const trimmed = (u: GuardResult['updated']) => (u ? { ...u, command: String(u.co
 // The port may be stricter than bash-guard (it asks where bash-guard guessed), never looser.
 describe.skipIf(!available(port) || !hasShfmt)('port against bash-guard', () => {
   const stricter: string[] = []
+  const notRun: string[] = []
   afterAll(() => {
     if (stricter.length) console.info(`port stricter than bash-guard on ${stricter.length} inputs, e.g.\n  ${stricter.slice(0, 5).join('\n  ')}`)
+    if (notRun.length) console.info(`bash-guard rewrote a grep that does not run on ${notRun.length} inputs, e.g.\n  ${notRun.slice(0, 5).join('\n  ')}`)
   })
+  // bash-guard rewrites grep words as text; the port only rewrites a grep that runs (`sudo -exec grep` is sudo -e, an edit).
+  const grepRuns = async (cmd: string) => (await extract(cmd)).invocations.some((i) => /^[ef]?grep$/.test(i.name ?? ''))
 
   test.prop([fc.oneof(shellSoup, grepCommand)], opts)('same decision and rewrite, or stricter', async (cmd) => {
     const [ref, got] = await Promise.all([runGuard(cmd, { impl: reference }), runGuard(cmd, { impl: port })])
     expect(got.decision).not.toBe('error')
     if (severity[got.decision] > severity[ref.decision]) {
       stricter.push(`${ref.decision} -> ${got.decision}: ${cmd}`)
+      return
+    }
+    if (got.decision === ref.decision && ref.updated && !got.updated && !(await grepRuns(cmd))) {
+      notRun.push(cmd)
       return
     }
     expect({ decision: got.decision, updated: trimmed(got.updated) }, `${cmd}\n${got.reason}`).toEqual({

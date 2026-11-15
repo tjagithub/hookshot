@@ -94,6 +94,8 @@ const table = {
     ['echo ~ | xargs -I{} rm -rf {}', 'ask'],
     ['ls | xargs grep a', 'rewrite'],
     ["env -S 'rm -rf ~'", 'ask'],
+    ['sudo -e grep a', undefined],
+    ['command -v rm', undefined],
   ],
   'shells and their scripts': [
     ["bash -c 'rm -rf ~'", 'deny'],
