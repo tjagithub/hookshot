@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# bash-guard: PreToolUse hook for the Bash tool. Parses the command with shfmt or lib/sh-parse.mjs
+# (zsh, then bash dialect) and walks the syntax tree with lib/bash-guard.jq, so quotes, pipes, $(...), wrappers
+# (sudo, xargs, timeout, env, find -exec ...) and bash -c '...' strings are seen as commands.
+#   1. grep/egrep/fgrep: rewritten to rg in place (updatedInput, no permissionDecision, so normal
+#      permission checks still apply) when every flag translates exactly; else blocked. zgrep: blocked.
+#   2. any unquoted word starting with --force
+#   3. sed -i / --in-place (BSD/GNU differ; use Edit or perl -pi -e)
+#   4. rm with a recursive flag aimed at /, /*, ~, ~/ or $HOME
+# Exit 2 blocks the call and sends stderr to Claude. A command shfmt cannot parse is let through
+# (the shell rejects it too); ssh/watch strings are not inspected.
+set -euo pipefail
+export LC_ALL=C # shfmt offsets are bytes; make ${var:off:len} count bytes too
+
+input=$(cat)
+cmd=$(jq -r '.tool_input.command // empty' <<<"$input")
+[[ -n $cmd ]] || exit 0
+lib="$(dirname "$0")/../lib"
+prog="$lib/bash-guard.jq"
+
+deny() { echo "guardrails: blocked. $1" >&2; exit 2; }
+skip() { echo "guardrails: no shell parser (install shfmt, or bun/node + sh-syntax); bash-guard skipped" >&2; exit 1; }
+
+# shfmt (~4 ms); else sh-syntax, the same parser as WASM (~40 ms on bun, ~110 ms on node).
+if [[ ${GUARD_PARSER:-} != sh-syntax ]] && command -v shfmt >/dev/null; then
+  parse() { shfmt -ln zsh --to-json <<<"$1" 2>/dev/null || shfmt -ln bash --to-json <<<"$1" 2>/dev/null; }
+elif js=$(command -v bun || command -v node); then
+  parse() { "$js" "$lib/sh-parse.mjs" <<<"$1"; }
+else
+  skip
+fi
+b64d() { printf '%s' "$1" | base64 -d; }
+
+# Queue of scripts: the command, then nested bash -c strings. base = byte offset in $cmd, or "-".
+scripts=("$cmd") bases=(0) starts=() ends=() texts=() notes=()
+have_jouet=0
+command -v jouet >/dev/null && have_jouet=1
+for ((n = 0; n < ${#scripts[@]} && n < 16; n++)); do
+  b=${bases[n]}
+  tree=$(parse "${scripts[n]}") || { (($? == 3)) && skip; continue; }
+  plan=$(jq -r --arg jouet "$have_jouet" --arg top "$((n == 0))" -f "$prog" <<<"$tree") || { echo "guardrails: bash-guard.jq failed" >&2; exit 1; }
+  while IFS=$'\t' read -r kind x y z note; do
+    case $kind in
+      D) deny "$x" ;;
+      E)
+        txt=$(b64d "$z")
+        [[ $b == - ]] && deny "grep inside a double-quoted or eval'd command; use rg there."
+        ((n > 0)) && [[ $txt == *"'"* ]] && deny "grep inside a quoted command needs quoting changes; use rg there."
+        starts+=("$((b + x))") ends+=("$((b + y))") texts+=("$txt") notes+=("$note") ;;
+      N)
+        scripts+=("$(b64d "$y")")
+        if [[ $b == - || $x == - ]]; then bases+=(-); else bases+=("$((b + x))"); fi ;;
+    esac
+  done <<<"$plan"
+done
+
+((${#starts[@]})) || exit 0
+
+# Apply edits from the last start offset to the first, so earlier offsets stay valid.
+new=$cmd
+while read -r _ i; do
+  new="${new:0:starts[i]}${texts[i]}${new:ends[i]}"
+done < <(for i in "${!starts[@]}"; do echo "${starts[i]} $i"; done | sort -rn)
+
+jq -c --arg c "$new" --arg notes "$(printf '%s\n' "${notes[@]}" | sort -u | paste -sd, -)" '{hookSpecificOutput: {
+  hookEventName: "PreToolUse", updatedInput: (.tool_input + {command: $c}),
+  additionalContext: ("guardrails rewrote (" + $notes + "); ran: " + $c
+    + (if $notes | contains("rg") then " (rg skips .gitignored and hidden files; add -uu for grep -r behaviour)" else "" end))}}' <<<"$input"
