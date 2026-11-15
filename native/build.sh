@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
-flags=(-trimpath -ldflags='-s -w')
+# No vcs stamp: otherwise every commit changes hsparse.wasm and the CI "matches git" check always warns.
+flags=(-trimpath -buildvcs=false -ldflags='-s -w')
 
 case "$(uname -s)" in
   Darwin) platform=darwin ;;
