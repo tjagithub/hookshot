@@ -3,14 +3,20 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import fc from 'fast-check'
 import { beforeAll, describe, expect, test } from 'vitest'
-import { parse, type Backend } from '../src/parse.ts'
+import { nativeAsset, parse, type Backend } from '../src/parse.ts'
 import { allowed, blocked, jouetRewrites, rewrites, untouched } from './cases.ts'
 import { grepCommand, numRuns, shellSoup } from './support/arbitraries.ts'
 import { hasShfmt, root } from './support/guard.ts'
 
 const build = join(root, 'native/build')
-const built = ['hsparse.node', 'libhsparse.dylib', 'hsparse.wasm'].every((f) => existsSync(join(build, f)))
+const built = [nativeAsset(), 'hsparse.wasm'].every((f) => existsSync(join(build, f)))
+const hasFfi = existsSync(join(build, 'libhsparse.dylib'))
 const has = (bin: string) => spawnSync(bin, ['--version']).status === 0
+
+// Locally a missing tool skips; in CI the same skip would hide a broken platform build.
+test.runIf(Boolean(process.env.CI))('CI has the addon, shfmt, bun and deno', () => {
+  expect({ built, hasShfmt, bun: has('bun'), deno: has('deno') }).toEqual({ built: true, hasShfmt: true, bun: true, deno: true })
+})
 
 const seed = Number(process.env.FC_SEED ?? 42)
 const commands = [
@@ -76,7 +82,7 @@ describe.skipIf(!built || !hasShfmt)('every backend and runtime matches shfmt --
     expectTrees(out.trees)
   })
 
-  test.skipIf(!has('bun'))('bun:ffi (experiment)', () => {
+  test.skipIf(!has('bun') || !hasFfi)('bun:ffi (experiment, HS_FFI=1 native/build.sh)', () => {
     const out = batch('bun', [join(root, 'native/ffi-batch.ts')])
     expectTrees(out.trees)
   })

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -58,6 +58,16 @@ function pathWithoutJouet(): string {
   return `${noJouetBin}:/usr/bin:/bin`
 }
 
+let stubJouetBin: string | undefined
+// Both guards only check that jouet is on PATH, so a stub keeps the tests independent of this machine.
+function pathWithJouet(): string {
+  if (!stubJouetBin) {
+    stubJouetBin = mkdtempSync(join(tmpdir(), 'hookshot-jouet-'))
+    writeFileSync(join(stubJouetBin, 'jouet'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  }
+  return `${stubJouetBin}:${process.env.PATH ?? ''}`
+}
+
 function normalize(impl: Impl, code: number | null, stdout: string, stderr: string): GuardResult {
   const raw = { code, stdout, stderr }
   const out = stdout.trim() ? JSON.parse(stdout).hookSpecificOutput : undefined
@@ -81,7 +91,7 @@ export function runGuard(command: string, opts: GuardOptions = {}): Promise<Guar
   delete env.HOOKSHOT_PARSER
   if (impl.impl === 'reference' && impl.parser === 'sh-syntax') env.GUARD_PARSER = 'sh-syntax'
   if (impl.impl === 'port') env.HOOKSHOT_PARSER = impl.backend
-  if (opts.jouet === false) env.PATH = pathWithoutJouet()
+  env.PATH = opts.jouet === false ? pathWithoutJouet() : pathWithJouet()
   const input = JSON.stringify({ tool_input: { ...opts.toolInput, command } })
   const [bin, args] = impl.impl === 'reference' ? [guardPath, []] : ['bun', [portPath]]
 
