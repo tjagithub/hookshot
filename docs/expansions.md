@@ -17,6 +17,7 @@ The rule is the same everywhere: a value known only at run time is *dynamic*. A 
 | `~+`, `~-`, `~user`, zsh `~1` | `rm -rf ~-` | dynamic (`$PWD`, `$OLDPWD`, a directory); a `~+/x` path is under the cwd |
 | Quoted tilde | `\~/x`, `"~"/x` | literal: a directory named `~` |
 | Parameters | `$X`, `"${X}"` | dynamic; a leading `$HOME` in a path is expanded |
+| Parameters in a path | `> $E/fix.txt`, `> $E/.env`, `> $f.sets` | the literal file name decides when it can: a `.env` rule passes `fix.txt` and asks on the others |
 | Command and arithmetic substitution | `$(…)`, `` `…` ``, `$((…))` | dynamic; the command inside is checked too |
 | Process substitution | `>(cat > .env)`, zsh `=(…)` | the command inside is checked; as a path it is dynamic |
 | zsh `=cmd` | `=rm -rf ~` | the command is `rm`; as a path (`> =ls`) it is dynamic |

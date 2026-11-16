@@ -37,7 +37,8 @@ function contextText(notes: Reason[], command?: string): string | undefined {
 
 const base = { hookEventName: 'PreToolUse' as const }
 export const asking = (reason: string): PreToolUseOutput => ({
-  hookSpecificOutput: { ...base, permissionDecision: 'ask', permissionDecisionReason: visible(reason) },
+  // keepLines: several reasons come joined by newlines (already escaped one by one in join).
+  hookSpecificOutput: { ...base, permissionDecision: 'ask', permissionDecisionReason: visible(reason, { keepLines: true }) },
 })
 
 // A rewrite alone sets no permissionDecision, so Claude Code's normal permission checks still apply.
