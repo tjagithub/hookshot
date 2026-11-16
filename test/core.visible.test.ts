@@ -42,6 +42,11 @@ describe('reasons reach Claude Code escaped; the rewritten command does not', ()
     const out = await handlePreToolUse(h, { tool_name: 'Bash', tool_input: { command: `rm 'a${esc}[2Kb'` } })
     expect(out?.hookSpecificOutput.permissionDecisionReason).toBe('[rm] no a\\x1b[2Kb')
   })
+  test('several ask reasons stay on separate lines', async () => {
+    const two = hooks([cmd('a').ask('one'), cmd('a').named('b').ask('two')])
+    const out = await handlePreToolUse(two, { tool_name: 'Bash', tool_input: { command: 'a' } })
+    expect(out?.hookSpecificOutput.permissionDecisionReason).toBe('[a] one\n[b] two')
+  })
   test('a note', async () => {
     const out = await handlePreToolUse(h, { tool_name: 'Bash', tool_input: { command: 'ls' } })
     expect(out?.hookSpecificOutput.additionalContext).toBe('[ls] hidden\\x1b[8m text')

@@ -53,6 +53,15 @@ const table = {
     ['echo K=1 > $(echo .env)', 'ask'],
     ['echo K=1 > >(cat > .env)', 'deny'],
     ['echo K=1 > =(echo)', 'ask'],
+    // A literal file name rules a dynamic target out: $D/fix.txt is never .env, whatever $D holds.
+    ['E=$(mktemp -d); echo K=1 > $E/fix.txt 2>&1; tail $E/fix.txt', undefined],
+    ['echo K=1 > "$D/x.env"', undefined],
+    ['echo K=1 > $D/.env', 'ask'],
+    ['echo K=1 > $D/.env.local', 'ask'],
+    ['echo K=1 > "$D"', 'ask'],
+    ['echo K=1 > $D/..', 'ask'],
+    ['echo K=1 > $f.sets', 'ask'],
+    ['echo K=1 > $D/*.txt', 'ask'],
   ],
   globs: [
     ['echo K=1 > .en?', 'ask'],

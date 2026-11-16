@@ -1,7 +1,7 @@
 import type { Context } from '../context.ts'
 import type { Extraction } from '../extract.ts'
 import type { Tri } from '../flags.ts'
-import { type Glob, compileGlob, globMatches, globMatchesUnder } from '../glob.ts'
+import { type Glob, compileGlob, globCouldEndWith, globMatches, globMatchesUnder } from '../glob.ts'
 import { type FileOp, type FileTarget, type PathValue, bashTargets } from '../paths.ts'
 import { type Verdict, combine, pass, unknown } from '../verdict.ts'
 import { Terminal } from './rule.ts'
@@ -55,7 +55,7 @@ export class PathRule extends Terminal<PathMatch> {
   }
 
   private matchPath(p: PathValue, ctx: Context): Tri {
-    if (p.kind === 'dynamic') return 'unknown'
+    if (p.kind === 'dynamic') return typeof this.spec === 'string' && p.base !== undefined ? globCouldEndWith(this.glob(ctx), p.base) : 'unknown'
     if (typeof this.spec === 'string') {
       return p.kind === 'known' ? globMatches(this.glob(ctx), p.abs) : globMatchesUnder(this.glob(ctx), p.rel)
     }

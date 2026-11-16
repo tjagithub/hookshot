@@ -105,6 +105,16 @@ export function globMatches(glob: Glob, abs: string): boolean {
   return glob.alternatives.some((a) => matchSegs(a, segs))
 }
 
+/** A path in unknown directories whose last segment is `base`: false when no alternative's last segment fits it. */
+export function globCouldEndWith(glob: Glob, base: string): Tri {
+  return glob.alternatives.some((a) => {
+    const last = a.at(-1)
+    return last === undefined || last === '**' || last.test(base)
+  })
+    ? 'unknown'
+    : false
+}
+
 /** A relative path under an unknown directory (after `cd`): true if every directory matches, false if none can. */
 export function globMatchesUnder(glob: Glob, rel: string): Tri {
   const segs = pathSegs(rel)

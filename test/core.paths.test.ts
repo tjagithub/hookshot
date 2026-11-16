@@ -2,7 +2,7 @@ import { fc, test } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { handlePreToolUse } from '../src/claude.ts'
 import type { Context } from '../src/context.ts'
-import { type GlobSeg, compileGlob, expandBraces, globMatches, globMatchesUnder, matchSegs } from '../src/glob.ts'
+import { type GlobSeg, compileGlob, expandBraces, globCouldEndWith, globMatches, globMatchesUnder, matchSegs } from '../src/glob.ts'
 import { hooks } from '../src/hook.ts'
 import { resolvePath } from '../src/paths.ts'
 import { path } from '../src/rules/path.ts'
@@ -37,6 +37,25 @@ describe('glob', () => {
   ])('%s vs %s -> %s', (pat, abs, want) => {
     expect(globMatches(g(pat), abs)).toBe(want)
   })
+
+  test.each([
+    ['/**/.env{,.*}', 'fix.txt', false],
+    ['/**/.env{,.*}', '.env.local', 'unknown'],
+    ['src/**', 'a.ts', 'unknown'],
+    ['{a,b}/*.md', 'x.md', 'unknown'],
+    ['{a,b}/*.md', 'x.ts', false],
+  ])('%s could end with %s -> %s', (pat, base, want) => {
+    expect(globCouldEndWith(g(pat), base)).toBe(want)
+  })
+
+  const globSeg = fc.constantFrom('a', '.env', '.env.x', 'b.md', '*', '**', '*.md', '{a,.env}')
+  test.prop([fc.array(globSeg, { minLength: 1, maxLength: 4 }), fc.array(fc.constantFrom('a', 'b', '.env'), { maxLength: 3 }), fc.constantFrom('a', '.env', '.env.x', 'b.md', 'x.ts')], { numRuns })(
+    'a glob ruled out by the last segment never matches a path ending in it',
+    (pat, dirs, base) => {
+      const glob = g(`/${pat.join('/')}`)
+      if (globCouldEndWith(glob, base) === false) expect(globMatches(glob, `/${[...dirs, base].join('/')}`)).toBe(false)
+    },
+  )
 
   test.each([
     ['/**/.env', '.env', true],

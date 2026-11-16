@@ -10,7 +10,8 @@ export type PathValue =
   | { kind: 'known'; abs: string; shown: string }
   /** Relative to a directory hookshot cannot know, e.g. after `cd`. */
   | { kind: 'relative'; rel: string; shown: string }
-  | { kind: 'dynamic'; shown: string }
+  /** base: the last segment, when it is literal (`$D/fix.txt`): a glob can rule the path out by it. */
+  | { kind: 'dynamic'; shown: string; base?: string }
 
 export type FileSource = 'tool' | 'redirect' | 'tee'
 
@@ -57,7 +58,9 @@ export function wordPath(w: WordValue, ctx: Context, cwdKnown = true): PathValue
     if (first.dynamic === '$HOME') return resolvePath(ctx.home + tail, ctx, { cwdKnown })
     if (first.dynamic === '$PWD') return { ...resolvePath(`.${tail}`, ctx, { cwdKnown, tilde: false }), shown: w.hint }
   }
-  return { kind: 'dynamic', shown: w.hint }
+  const last = w.segments.at(-1)
+  const base = typeof last === 'string' && last.includes('/') ? last.slice(last.lastIndexOf('/') + 1) : ''
+  return base && base !== '.' && base !== '..' ? { kind: 'dynamic', shown: w.hint, base } : { kind: 'dynamic', shown: w.hint }
 }
 
 /** A Bash target word as paths: one per brace alternative (`tee {a,b}` writes both), each tilde-expanded like bash. */
